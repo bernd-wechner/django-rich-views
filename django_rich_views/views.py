@@ -21,7 +21,8 @@ These Extensions aim at providing primarily two things:
 In the process it also supports Field Privacy and Admin fields though these were spun out as independent packages.
 '''
 # Python imports
-import os, datetime
+import os
+import datetime
 
 # Django imports
 from django.views.generic import TemplateView, ListView, DetailView, CreateView, UpdateView, DeleteView
@@ -56,7 +57,9 @@ from .model import collect_rich_object_fields, inherit_fields, intrinsic_relatio
 from .related_forms import RelatedForms
 from .filterset import format_filterset, is_filter_field
 
-if settings.DEBUG: import sys, traceback
+if settings.DEBUG:
+    import sys
+    import traceback
 
 # import sys, os
 # print(f'DEBUG: current trace function in {os.getpid()}', sys.gettrace())
@@ -75,7 +78,7 @@ def get_filterset(self):
     FilterSet = type("FilterSet", (ModelFilterSet,), {
         'Meta': type("Meta", (object,), {
             'model': self.model
-            })
+        })
     })
 
     qs = self.model.objects.all()
@@ -83,7 +86,8 @@ def get_filterset(self):
     # Create a mutable QueryDict (default ones are not mutable)
     qd = QueryDict('', mutable=True)
 
-    # Add the GET parameters unconditionally, a user request overrides a session saved filter
+    # Add the GET parameters unconditionally, a user request overrides a
+    # session saved filter
     if hasattr(self.request, 'GET'):
         qd.update(self.request.GET)
 
@@ -143,7 +147,8 @@ def get_filterset(self):
 
         # Te GET filters were already added to qd, so before we add session filters
         # we throw out any that are already in there as we provide priority to
-        # user specified filters in the GET params over the session defined fall backs.
+        # user specified filters in the GET params over the session defined
+        # fall backs.
         F = session_filters.copy()
         for f in session_filters:
             if f in qd:
@@ -155,7 +160,8 @@ def get_filterset(self):
     # TODO: test this with GET params and session filter!
     fs = FilterSet(data=qd, queryset=qs, strict_mode=StrictMode.fail)
 
-    # get_specs raises an Empty exception if there are no specs, and a ValidationError if a value is illegal
+    # get_specs raises an Empty exception if there are no specs, and a
+    # ValidationError if a value is illegal
     try:
         specs = fs.get_specs()
     except Exception as E:
@@ -176,16 +182,110 @@ def get_ordering(self):
         return getattr(self.model._meta, 'ordering', None)
 
 
+def dispatch_generic(self, request, *args, **kwargs):
+    '''
+    Adds attributes to the view describing the app and model a
+    and provides a pre_dispatch hook for setting view properties
+    in derived classes.
+
+    :param self: and instance of CreateView, UpdateView, ListView, DetailView, DeleteView, LoginView or TemplateView
+    '''
+    if isinstance(self, (CreateView, UpdateView, ListView, DetailView, DeleteView)):
+        self.app = app_from_object(self)
+        self.model = class_from_string(self, self.kwargs['model'])
+
+        if isinstance(self, (CreateView, UpdateView)):
+            if not hasattr(self, 'fields') or self.fields == None:
+                self.fields = '__all__'
+
+        if callable(getattr(self, 'pre_dispatch', None)):
+            self.pre_dispatch()
+
+        if isinstance(self, CreateView):
+            return super(CreateView, self).dispatch(request, *args, **kwargs)
+        elif isinstance(self, UpdateView):
+            return super(UpdateView, self).dispatch(request, *args, **kwargs)
+        elif isinstance(self, ListView):
+            return super(ListView, self).dispatch(request, *args, **kwargs)
+        elif isinstance(self, DetailView):
+            return super(DetailView, self).dispatch(request, *args, **kwargs)
+        elif isinstance(self, DeleteView):
+            return super(DeleteView, self).dispatch(request, *args, **kwargs)
+
+    elif isinstance(self, (LoginView, TemplateView)):
+        if callable(getattr(self, 'pre_dispatch', None)):
+            self.pre_dispatch()
+
+        if isinstance(self, LoginView):
+            return super(LoginView, self).dispatch(request, *args, **kwargs)
+        elif isinstance(self, TemplateView):
+            return super(TemplateView, self).dispatch(request, *args, **kwargs)
+    else:
+        raise NotImplementedError(
+            "Generic dispatch only for use by CreateView, UpdateView, ListView, DetailView, DeleteView, LoginView and TemplateView and derivatives.")
+
+
+def get_context_data_generic(self, *args, **kwargs):
+    '''
+    Augments the standard context with model and related model information
+    so that the template in well informed - and can do Javascript wizardry
+    based on this information
+
+    :param self: and instance of CreateView or UpdateView
+
+    This is code shared by the two views so peeled out into a generic.
+    '''
+    if settings.DEBUG:
+        log.debug("Preparing context data.")
+
+    if isinstance(self, CreateView):
+        # Note that the super.get_context_data initialises the form with
+        # get_initial
+        context = super(CreateView, self).get_context_data(*args, **kwargs)
+        title = 'New'
+    elif isinstance(self, UpdateView):
+        # Note that the super.get_context_data initialises the form with
+        # get_object
+        context = super(UpdateView, self).get_context_data(*args, **kwargs)
+        title = 'Edit'
+    else:
+        raise NotImplementedError(
+            "Generic get_context_data only for use by CreateView or UpdateView derivatives.")
+
+    # Now add some context extensions ....
+    add_model_context(self, context, plural=False, title=title)
+    add_timezone_context(self, context)
+    add_debug_context(self, context)
+    if callable(getattr(self, 'extra_context_provider', None)):
+        context.update(self.extra_context_provider(context))
+
+    if settings.DEBUG:
+        log.debug("Prepared this context data.")
+        for k, v in context.items():
+            # For the form we want to list the form.data really. The rest is
+            # unnecessary.
+            if k == "form":
+                log.debug(f"\tform.data:")
+                for field, value in sorted(v.data.items()):
+                    log.debug(f"\t\t{field}: {value}")
+            else:
+                log.debug(f"\t{k}: {v}")
+
+    return context
+
+
 class RichLoginView(LoginView):
     '''
     An extension to the LoginView that adds timezone context and a hook for providing more context
     to the basic Django LoginView (in a manner compatible with other Rich Views)
     '''
+    dispatch = dispatch_generic
 
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(*args, **kwargs)
         add_timezone_context(self, context)
-        if callable(getattr(self, 'extra_context_provider', None)): context.update(self.extra_context_provider())
+        if callable(getattr(self, 'extra_context_provider', None)):
+            context.update(self.extra_context_provider())
         return context
 
     def form_valid(self, form):
@@ -199,11 +299,13 @@ class RichTemplateView(TemplateView):
     An extension of the basic TemplateView for a home page on the site say (not related to any model)
     which provides some extra context if desired in a manner compatible with the other Rich Views
     '''
+    dispatch = dispatch_generic
 
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(*args, **kwargs)
         add_timezone_context(self, context)
-        if callable(getattr(self, 'extra_context_provider', None)): context.update(self.extra_context_provider())
+        if callable(getattr(self, 'extra_context_provider', None)):
+            context.update(self.extra_context_provider())
         return context
 
 
@@ -211,6 +313,7 @@ class RichListView(ListView):
     # HTML formattters stolen straight form the Django ModelForm class basically.
     # Allowing us to present lists basically with the same flexibility as pre-formattted
     # HTML objects.
+    operation = 'list'
     _html_output = list_html_output
 
     as_table = object_as_table
@@ -219,10 +322,13 @@ class RichListView(ListView):
     as_br = object_as_br
     as_html = object_as_html  # Chooses one of the first four based on request parameters
 
+    dispatch = dispatch_generic
+
     # Fetch all the objects for this model
     def get_queryset(self, *args, **kwargs):
         if settings.DEBUG:
-            log.debug(f"Getting Queryset for List View. Process ID: {os.getpid()}.")
+            log.debug(
+                f"Getting Queryset for List View. Process ID: {os.getpid()}.")
             if len(self.request.GET) > 0:
                 log.debug(f"GET parameters:")
                 for key, val in self.request.GET.items():
@@ -258,13 +364,15 @@ class RichListView(ListView):
 
         if settings.DEBUG:
             log.debug(f"ordering  = {self.ordering}")
-            log.debug(f"filterset = {self.filterset.get_specs() if self.filterset else None}")
+            log.debug(
+                f"filterset = {self.filterset.get_specs() if self.filterset else None}")
 
         self.count = len(self.queryset)
 
         return self.queryset
 
-    # Add some model identifiers to the context (if 'model' is passed in via the URL)
+    # Add some model identifiers to the context (if 'model' is passed in via
+    # the URL)
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(*args, **kwargs)
 
@@ -275,7 +383,8 @@ class RichListView(ListView):
         add_ordering_context(self, context)
         add_debug_context(self, context)
         context["total"] = self.model.objects.all().count
-        if callable(getattr(self, 'extra_context_provider', None)): context.update(self.extra_context_provider())
+        if callable(getattr(self, 'extra_context_provider', None)):
+            context.update(self.extra_context_provider())
         return context
 
 
@@ -286,6 +395,7 @@ class RichDetailView(DetailView):
     # HTML formatters stolen straight form the Django ModelForm class
     # Allowing us to present object detail views  basically with the same flexibility
     # as pre-formattted HTML objects.
+    operation = 'view'
     _html_output = object_html_output
 
     as_table = object_as_table
@@ -294,13 +404,7 @@ class RichDetailView(DetailView):
     as_br = object_as_br
     as_html = object_as_html  # Chooses one of the first three based on request parameters
 
-    # Override properties with values passed as arguments from as_view()
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if ('operation' in kwargs):
-            self.operation = kwargs['operation']
-
-    # Add some model identifiers to the context (if 'model' is passed in via the URL)
+    dispatch = dispatch_generic
 
     # Fetch the URL specified object, needs the URL parameters "model" and "pk"
     def get_object(self, *args, **kwargs):
@@ -313,7 +417,8 @@ class RichDetailView(DetailView):
         # Get Neighbour info for the object browser
         self.filterset = get_filterset(self)
 
-        neighbours = get_neighbour_pks(self.model, self.pk, filterset=self.filterset, ordering=self.ordering)
+        neighbours = get_neighbour_pks(
+            self.model, self.pk, filterset=self.filterset, ordering=self.ordering)
 
         # Support for incoming next/prior requests via a GET
         if 'next' in self.request.GET or 'prior' in self.request.GET:
@@ -353,7 +458,8 @@ class RichDetailView(DetailView):
         add_filter_context(self, context)
         add_ordering_context(self, context)
         add_debug_context(self, context)
-        if callable(getattr(self, 'extra_context_provider', None)): context.update(self.extra_context_provider())
+        if callable(getattr(self, 'extra_context_provider', None)):
+            context.update(self.extra_context_provider())
         return context
 
 # TODO: Ranks, Performances  etc. Fix edit forms
@@ -367,78 +473,8 @@ class RichDetailView(DetailView):
 #
 # None of this should be super complicated because intent is to only edit these through
 # Session objects anyhow and the Team, Rank, Perfromance and related objects will not even
-# be available on production menues, only for the admin for drilling down and debugging.
-
-
-def dispatch_generic(self, request, *args, **kwargs):
-    '''
-    Adds attributes to the view describing the app and model a
-    and provides a pre_dispatch hook for setting view properties
-    in derived classes.
-
-    :param self: and instance of CreateView or UpdateView
-    '''
-    if isinstance(self, (CreateView, UpdateView)):
-        self.app = app_from_object(self)
-        self.model = class_from_string(self, self.kwargs['model'])
-
-        if not hasattr(self, 'fields') or self.fields == None:
-            self.fields = '__all__'
-
-        if callable(getattr(self, 'pre_dispatch', None)):
-            self.pre_dispatch()
-
-        if isinstance(self, CreateView):
-            return super(CreateView, self).dispatch(request, *args, **kwargs)
-        elif isinstance(self, UpdateView):
-            return super(UpdateView, self).dispatch(request, *args, **kwargs)
-    else:
-        raise NotImplementedError("Generic dispatch only for use by CreateView or UpdateView derivatives.")
-
-
-def get_context_data_generic(self, *args, **kwargs):
-    '''
-    Augments the standard context with model and related model information
-    so that the template in well informed - and can do Javascript wizardry
-    based on this information
-
-    :param self: and instance of CreateView or UpdateView
-
-    This is code shared by the two views so peeled out into a generic.
-    '''
-    if settings.DEBUG:
-        log.debug("Preparing context data.")
-
-    if isinstance(self, CreateView):
-        # Note that the super.get_context_data initialises the form with get_initial
-        context = super(CreateView, self).get_context_data(*args, **kwargs)
-        title = 'New'
-    elif isinstance(self, UpdateView):
-        # Note that the super.get_context_data initialises the form with get_object
-        context = super(UpdateView, self).get_context_data(*args, **kwargs)
-        title = 'Edit'
-    else:
-        raise NotImplementedError("Generic get_context_data only for use by CreateView or UpdateView derivatives.")
-
-    # Now add some context extensions ....
-    add_model_context(self, context, plural=False, title=title)
-    add_timezone_context(self, context)
-    add_debug_context(self, context)
-    if callable(getattr(self, 'extra_context_provider', None)):
-        context.update(self.extra_context_provider(context))
-
-    if settings.DEBUG:
-        log.debug("Prepared this context data.")
-        for k, v in context.items():
-            # For the form we want to list the form.data really. The rest is unnecessary.
-            if k == "form":
-                log.debug(f"\tform.data:")
-                for field, value in sorted(v.data.items()):
-                    log.debug(f"\t\t{field}: {value}")
-            else:
-                log.debug(f"\t{k}: {v}")
-
-    return context
+# be available on production menues, only for the admin for drilling down
+# and debugging.
 
 
 def get_form_generic(self, return_mqfns=False):
@@ -478,31 +514,37 @@ def get_form_generic(self, return_mqfns=False):
     elif isinstance(self, UpdateView):
         form = super(UpdateView, self).get_form()
     else:
-        raise NotImplementedError("Generic get_form only for use by CreateView or UpdateView derivatives.")
+        raise NotImplementedError(
+            "Generic get_form only for use by CreateView or UpdateView derivatives.")
 
     unique_model_choice = getattr(self, 'unique_model_choice', [])
 
-    # Attach DAL (Django Autocomplete Light) Select2 widgets to all the model selectors
+    # Attach DAL (Django Autocomplete Light) Select2 widgets to all the model
+    # selectors
     mqfns = []
     for field_name, field in form.fields.items():
         if isinstance(field, ModelChoiceField):
             field_model = field.queryset.model
             selector = getattr(field_model, "selector_field", None)
             if not selector is None:
-                url = reverse_lazy('autocomplete', kwargs={"model": field_model.__name__, "field_name": selector})
+                url = reverse_lazy('autocomplete', kwargs={
+                                   "model": field_model.__name__, "field_name": selector})
                 qualified_field_name = f"{form._meta.model.__name__}.{field_name}"
                 mqfns.append(qualified_field_name)
                 if qualified_field_name in unique_model_choice:
                     forward_function = qualified_field_name
                     forward_parameter = 'exclude'
-                    forward_declaration = (forward.JavaScript(forward_function, forward_parameter),)
+                    forward_declaration = (forward.JavaScript(
+                        forward_function, forward_parameter),)
                 else:
                     forward_declaration = None
 
                 if isinstance(field, ModelMultipleChoiceField):
-                    field.widget = autocomplete.ModelSelect2Multiple(url=url, forward=forward_declaration)
+                    field.widget = autocomplete.ModelSelect2Multiple(
+                        url=url, forward=forward_declaration)
                 else:
-                    field.widget = autocomplete.ModelSelect2(url=url, forward=forward_declaration)
+                    field.widget = autocomplete.ModelSelect2(
+                        url=url, forward=forward_declaration)
 
                 field.widget.choices = field.choices
 
@@ -528,20 +570,24 @@ def get_form_generic(self, return_mqfns=False):
                     field_model = field.queryset.model
                     selector = getattr(field_model, "selector_field", None)
                     if not selector is None:
-                        url = reverse_lazy('autocomplete', kwargs={"model": field_model.__name__, "field_name": selector})
+                        url = reverse_lazy('autocomplete', kwargs={
+                                           "model": field_model.__name__, "field_name": selector})
                         qualified_field_name = f"{related_model_name}.{field_name}"
                         mqfns.append(qualified_field_name)
                         if qualified_field_name in unique_model_choice:
                             forward_function = qualified_field_name
                             forward_parameter = 'exclude'
-                            forward_declaration = (forward.JavaScript(forward_function, forward_parameter),)
+                            forward_declaration = (forward.JavaScript(
+                                forward_function, forward_parameter),)
                         else:
                             forward_declaration = None
 
                         if isinstance(field, ModelMultipleChoiceField):
-                            field.widget = autocomplete.ModelSelect2Multiple(url=url, forward=forward_declaration)
+                            field.widget = autocomplete.ModelSelect2Multiple(
+                                url=url, forward=forward_declaration)
                         else:
-                            field.widget = autocomplete.ModelSelect2(url=url, forward=forward_declaration)
+                            field.widget = autocomplete.ModelSelect2(
+                                url=url, forward=forward_declaration)
 
                         field.widget.choices = field.choices
 
@@ -577,7 +623,8 @@ def post_generic(self, request, *args, **kwargs):
         html = "<h1>self.request.POST:</h1>"
         html += "<table>"
         for key in sorted(self.request.POST):
-            html += "<tr><td>{}:</td><td>{}</td></tr>".format(key, self.request.POST[key])
+            html += "<tr><td>{}:</td><td>{}</td></tr>".format(
+                key, self.request.POST[key])
         html += "</table>"
         return HttpResponse(html)
 
@@ -591,27 +638,33 @@ def post_generic(self, request, *args, **kwargs):
     elif isinstance(self, UpdateView) or isinstance(self, DeleteView):
         self.object = self.get_object()
     else:
-        raise NotImplementedError("Generic post only for use by CreateView or UpdateView derivatives.")
+        raise NotImplementedError(
+            "Generic post only for use by CreateView or UpdateView derivatives.")
 
-    # Delete is handled specially (it's much simpler that Create and Update Views)
+    # Delete is handled specially (it's much simpler that Create and Update
+    # Views)
     if isinstance(self, DeleteView):
         # Hook for pre-processing steps (before the object is actually deleted)
-        # The handler can return a kwargs dict to pass to the post delete handler.
+        # The handler can return a kwargs dict to pass to the post delete
+        # handler.
         if callable(getattr(self, 'pre_delete', None)):
             next_kwargs = self.pre_delete()
-            if not next_kwargs: next_kwargs = {}
+            if not next_kwargs:
+                next_kwargs = {}
             if "debug_only" in next_kwargs:
                 return HttpResponse(next_kwargs["debug_only"])
 
         with transaction.atomic():
             if settings.DEBUG:
-                log.debug(f"Deleting: {self.object._meta.object_name} {self.object.pk}.")
+                log.debug(
+                    f"Deleting: {self.object._meta.object_name} {self.object.pk}.")
 
             # For deletes we won't concern ourselves with related forms.
             # Generally the on_delete property of ForeignKey relations will hanld cascading
             # deletes if properly configured in the models, and if any special follow-on
             # deletes or other actions are needed the pre_delete and post_delete hooks are
-            # available for a derived class lient to manage that in code explicitly.
+            # available for a derived class lient to manage that in code
+            # explicitly.
             response = self.delete(request, *args, **kwargs)
 
             # Hook for post-processing steps (after the object is actually deleted)
@@ -633,7 +686,8 @@ def post_generic(self, request, *args, **kwargs):
             html = "<h1>self.form.data:</h1>"
             html += "<table>"
             for key in sorted(self.form.data):
-                html += "<tr><td>{}:</td><td>{}</td></tr>".format(key, self.form.data[key])
+                html += "<tr><td>{}:</td><td>{}</td></tr>".format(
+                    key, self.form.data[key])
             html += "</table>"
             return HttpResponse(html)
 
@@ -655,7 +709,8 @@ def post_generic(self, request, *args, **kwargs):
         # The way to do that is in this first pass to feign a Creation form, by removing self.form.instance.
         # Calling is_valid() and then replacing self.form.instance  again so that the pre_transaction handler
         # can see it and compare form.cleaned_data with the object to make change based decisions and
-        # pass them back as arguments into pre_save and indirectly the pre_commit handler.
+        # pass them back as arguments into pre_save and indirectly the
+        # pre_commit handler.
 
         # Cloak self.form.instance.
         # Django wants to see an new instance of the model though.
@@ -677,7 +732,8 @@ def post_generic(self, request, *args, **kwargs):
         # to ensure that the is_valid() call passes or fails as desired.
         if callable(getattr(self, 'pre_validation', None)):
             next_kwargs = self.pre_validation()
-            if not next_kwargs: next_kwargs = {}
+            if not next_kwargs:
+                next_kwargs = {}
             if "debug_only" in next_kwargs:
                 return HttpResponse(next_kwargs["debug_only"])
 
@@ -691,7 +747,8 @@ def post_generic(self, request, *args, **kwargs):
             # if neeed and the next validation will fail.
             if callable(getattr(self, 'pre_transaction', None)):
                 next_kwargs = self.pre_transaction(**next_kwargs)
-                if not next_kwargs: next_kwargs = {}
+                if not next_kwargs:
+                    next_kwargs = {}
                 if "debug_only" in next_kwargs:
                     return HttpResponse(next_kwargs["debug_only"])
 
@@ -707,37 +764,48 @@ def post_generic(self, request, *args, **kwargs):
                         # related forms).
                         if callable(getattr(self, 'pre_save', None)):
                             next_kwargs = self.pre_save(**next_kwargs)
-                            if not next_kwargs: next_kwargs = {}
+                            if not next_kwargs:
+                                next_kwargs = {}
 
                         if settings.DEBUG:
-                            log.debug("Saving form with this submitted for data:")
+                            log.debug(
+                                "Saving form with this submitted for data:")
                             for (key, val) in sorted(self.form.data.items()):
                                 # See: https://code.djangoproject.com/ticket/1130
-                                # list items are hard to identify it seems in a generic manner
-                                log.debug(f"\t{key}: {val} & {self.form.data.getlist(key)}")
+                                # list items are hard to identify it seems in a
+                                # generic manner
+                                log.debug(
+                                    f"\t{key}: {val} & {self.form.data.getlist(key)}")
 
                         if self.object:  # unprotect it from the full_clean augmentation once more
-                            # Uncloak self.form.instance. From here on in we can proceed as normal.
+                            # Uncloak self.form.instance. From here on in we
+                            # can proceed as normal.
                             self.form.instance = self.object
                             # Reclean the data which ensures this instance has the form data applied now.
                             # This may raise a ValidationError if it fails to apply form data to the instance
-                            # for any reason.  Which rightly, rolls back our transaction.
+                            # for any reason.  Which rightly, rolls back our
+                            # transaction.
                             self.form.full_clean()
-                            # Or maybe not, so check for errors and raise one if found:
+                            # Or maybe not, so check for errors and raise one
+                            # if found:
                             if self.form.errors:
-                                raise ValidationError(f'Some errors were detected in your submission. Errors: {self.form.errors}')
+                                raise ValidationError(
+                                    f'Some errors were detected in your submission. Errors: {self.form.errors}')
 
                         self.object = self.form.save()
 
                         if settings.DEBUG:
-                            log.debug(f"Saved object: {self.object._meta.object_name} {self.object.pk}.")
+                            log.debug(
+                                f"Saved object: {self.object._meta.object_name} {self.object.pk}.")
 
                         kwargs = self.kwargs
                         kwargs['pk'] = self.object.pk
 
-                        # By default, on success jump to a view of the obbject just submitted.
+                        # By default, on success jump to a view of the obbject
+                        # just submitted.
                         if not self.success_url:
-                            self.success_url = reverse_lazy('view', kwargs=kwargs)
+                            self.success_url = reverse_lazy(
+                                'view', kwargs=kwargs)
 
                         if isinstance(self, CreateView):
                             # Having saved the root object we reinitialise related forms
@@ -745,7 +813,8 @@ def post_generic(self, request, *args, **kwargs):
                             # form_clean failing as the formsets don't have populated
                             # back references (as we had no object) and it fails with
                             # 'This field is required.' erros on the primary keys
-                            self.form.related_forms = RelatedForms(self.model, self.form.data, self.object)
+                            self.form.related_forms = RelatedForms(
+                                self.model, self.form.data, self.object)
 
                         if hasattr(self.form, 'related_forms') and isinstance(self.form.related_forms, RelatedForms):
                             if settings.DEBUG:
@@ -753,7 +822,8 @@ def post_generic(self, request, *args, **kwargs):
 
                             # Either of the pre_transaction or pre_save handlers might have replace self.form.data with
                             # something cleaned up. self.form.related_forms was initialised before these were alled and
-                            # noted the contents of self.form.data. We need to inform it of any change.
+                            # noted the contents of self.form.data. We need to
+                            # inform it of any change.
                             self.form.related_forms.set_data(self.form.data)
 
                             if self.form.related_forms.are_valid(self.model.__name__):
@@ -763,7 +833,8 @@ def post_generic(self, request, *args, **kwargs):
                                     log.debug(f"Saved the related forms.")
                             else:
                                 if settings.DEBUG:
-                                    log.debug(f"Invalid related forms. Errors: {self.form.related_forms.errors}")
+                                    log.debug(
+                                        f"Invalid related forms. Errors: {self.form.related_forms.errors}")
                                 # Attach the newly annotated (with errors) related forms to the
                                 # form so that theyt reach the response template.
                                 # self.form.related_forms = related_forms
@@ -771,9 +842,11 @@ def post_generic(self, request, *args, **kwargs):
                                 # atomic transaction triggering a rollback.
                                 for rm, errors in self.form.related_forms.errors.items():
                                     for error in errors:
-                                        self.form.add_error(None, f"{rm}: {error.as_text()}")
+                                        self.form.add_error(
+                                            None, f"{rm}: {error.as_text()}")
 
-                                raise ValidationError(f"Please fix these and resubmit.")
+                                raise ValidationError(
+                                    f"Please fix these and resubmit.")
 
                         # Give the object a chance to cleanup relations before we commit.
                         # Really a chance for the model to set some standards on relations
@@ -786,10 +859,12 @@ def post_generic(self, request, *args, **kwargs):
                         # prior to committing the update. This is ideal for any checks that rely on the form (and its
                         # related formsets_having been saved. Code therein can access the saved objects and draw
                         # conclusions. Raising an IntegrityError or ValidationError  will roll back the transaction.
-                        # and bounce back to display the form with form.errors shown.
+                        # and bounce back to display the form with form.errors
+                        # shown.
                         if callable(getattr(self, 'pre_commit', None)):
                             next_kwargs = self.pre_commit(**next_kwargs)
-                            if not next_kwargs: next_kwargs = {}
+                            if not next_kwargs:
+                                next_kwargs = {}
 
                         if settings.DEBUG:
                             log.debug(f"Cleaned the relations.")
@@ -801,8 +876,10 @@ def post_generic(self, request, *args, **kwargs):
                     if settings.DEBUG:
                         # Some tracback generation for debugging if needed
                         exc_type, exc_obj, exc_tb = sys.exc_info()
-                        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                        log.debug(f"{exc_type.__name__} in {fname} at line {exc_tb.tb_lineno}")
+                        fname = os.path.split(
+                            exc_tb.tb_frame.f_code.co_filename)[1]
+                        log.debug(
+                            f"{exc_type.__name__} in {fname} at line {exc_tb.tb_lineno}")
                         log.debug(traceback.format_exc())
 
                     message = getattr(e, 'message', e.args[0])
@@ -816,7 +893,8 @@ def post_generic(self, request, *args, **kwargs):
                 # HOOK 5 post_save: Hook for post-processing data (after it's all saved)
                 # The form is valid now and returns form_valid() so post save processing
                 # is not the place to raise any exceptions or add any form errors, that
-                # is all done and dusted. It is a place for any post save bookkeeping.
+                # is all done and dusted. It is a place for any post save
+                # bookkeeping.
                 if callable(getattr(self, 'post_save', None)):
                     self.post_save(**next_kwargs)
 
@@ -826,7 +904,9 @@ def post_generic(self, request, *args, **kwargs):
                 return self.form_invalid(self.form)
         else:
             # Bounced by the first pass of per handled form data
-            self.form.instance = self.object  # Uncloak self.form.instance. From here on in we can proceed as normal.
+            # Uncloak self.form.instance. From here on in we can proceed as
+            # normal.
+            self.form.instance = self.object
             return self.form_invalid(self.form)
 
 
@@ -860,7 +940,8 @@ def form_invalid_generic(self, form):
     without aboy related form data.
     '''
     context = self.get_context_data(form=form)
-    response = TemplateResponse(self.request, self.template_name, context, headers={"Cache-Control": "no-store"})
+    response = TemplateResponse(self.request, self.template_name, context, headers={
+                                "Cache-Control": "no-store"})
     response.render()
 
     if settings.DEBUG:
@@ -868,7 +949,8 @@ def form_invalid_generic(self, form):
         log.debug(f"\t{response.context_data['form'].errors}")
         log.debug("Form context:")
         for k, v in context.items():
-            # For the form we want to list the form.data really. The rest is unnecessary.
+            # For the form we want to list the form.data really. The rest is
+            # unnecessary.
             if k == "form":
                 log.debug(f"\tform.data:")
                 for field, value in sorted(v.data.items()):
@@ -907,6 +989,7 @@ class RichCreateView(CreateView):
     happens that by that point self.instance already has a PK thanks to the save here in post() but
     it is an unnecessary repeat save all the same.
     '''
+    operation = 'add'
     dispatch = dispatch_generic
     get_context_data = get_context_data_generic
     get_form = get_form_generic
@@ -925,7 +1008,8 @@ class RichCreateView(CreateView):
 
     # Fields in unique_model_choice are identfied by the model qualified field name, in form <model>.field_name>.
     # The qualified names that are DAL widgets are saved in this form property for reference to see what qualified
-    # field names have DAL widgets. This is  a dict keyed on the qualified field name with the widget as a value
+    # field names have DAL widgets. This is  a dict keyed on the qualified
+    # field name with the widget as a value
     dal_widgets = {}
 
     def get_initial(self):
@@ -971,7 +1055,8 @@ class RichCreateView(CreateView):
                         field_value = getattr(last, field_name + "_local")
 
                     # Find a time delta if any
-                    delta = getattr(self.model, "inherit_time_delta", datetime.timedelta(0))
+                    delta = getattr(
+                        self.model, "inherit_time_delta", datetime.timedelta(0))
 
                     # If delta is a callable, call it
                     if callable(delta):
@@ -1011,7 +1096,7 @@ class RichUpdateView(UpdateView):
           And on a POST request it just calls post(). So we set up self.model and self.object in
           get_object() for GET requests and post() for POST requests.
     '''
-
+    operation = 'edit'
     dispatch = dispatch_generic
     get_context_data = get_context_data_generic
     get_form = get_form_generic
@@ -1042,19 +1127,16 @@ class RichUpdateView(UpdateView):
 class RichDeleteView(DeleteView):
     '''An enhanced DeleteView which provides the HTML output methods as_table, as_ul and as_p just like the ModelForm does.'''
     # HTML formatters stolen straight form the Django ModelForm class
+    operation = 'delete'
     _html_output = object_html_output
     as_table = object_as_table
     as_ul = object_as_ul
     as_p = object_as_p
     as_br = object_as_br
     as_html = object_as_html  # Chooses one of the first three based on request parameters
-    post = post_generic
 
-    # Override properties with values passed as arguments from as_view()
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if ('operation' in kwargs):
-            self.opertion = kwargs['operation']
+    dispatch = dispatch_generic
+    post = post_generic
 
     # Get the actual object to update
     def get_object(self, *args, **kwargs):
@@ -1065,20 +1147,24 @@ class RichDeleteView(DeleteView):
         self.obj = get_object_or_404(self.model, pk=self.kwargs['pk'])
         self.format = get_object_display_format(self.request.GET)
 
-        # By default jump to a list of objects (fomr which htis one was deleted)
+        # By default jump to a list of objects (fomr which htis one was
+        # deleted)
         if not self.success_url:
-            self.success_url = reverse_lazy('list', kwargs={'model': self.kwargs['model']})
+            self.success_url = reverse_lazy(
+                'list', kwargs={'model': self.kwargs['model']})
 
         collect_rich_object_fields(self)
 
         return self.obj
 
-    # Add some model identifiers to the context (if 'model' is passed in via the URL)
+    # Add some model identifiers to the context (if 'model' is passed in via
+    # the URL)
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(*args, **kwargs)
         add_model_context(self, context, plural=False, title='Delete')
         add_timezone_context(self, context)
         add_format_context(self, context)
         add_debug_context(self, context)
-        if callable(getattr(self, 'extra_context_provider', None)): context.update(self.extra_context_provider())
+        if callable(getattr(self, 'extra_context_provider', None)):
+            context.update(self.extra_context_provider())
         return context

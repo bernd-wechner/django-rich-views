@@ -83,7 +83,7 @@ The extended views:
         model - the model class (available as view.model as well, but what the heck.
         model_name - because it's not easy to reference view.model.__name__ in a template alas.
         model_name_plural - because it's handier than referencing view.model._meta.verbose_name_plural
-        operation - the value of "operation" passed from urlconf (should be "list", "view", "add", "edit" or "delete")
+        operation - "list", "view", "add", "edit" or "delete" typically
         title - a convenient title constructed from the above that can be used in a template
         default_datetime_input_format - the default Django datetime input format as a PHP datetime format string. Very useful for configuring a datetime picker.
 
@@ -218,4 +218,3 @@ import html
 NONE = html.escape("<None>")
 NOT_SPECIFIED = html.escape("<Not specified>")
 FIELD_LINK_CLASS = "field_link"
-
