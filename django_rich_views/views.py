@@ -32,7 +32,7 @@ from django.shortcuts import get_object_or_404
 from django.urls import reverse_lazy
 from django.db import transaction
 # from django.db.models.query import QuerySet
-from django.db.utils import IntegrityError
+from django.db.utils import IntegrityError, ProgrammingError
 from django.http.response import HttpResponse, HttpResponseRedirect  # , JsonResponse
 from django.template.response import TemplateResponse
 from django.http.request import QueryDict
@@ -192,6 +192,10 @@ def dispatch_generic(self, request, *args, **kwargs):
     '''
     if isinstance(self, (CreateView, UpdateView, ListView, DetailView, DeleteView)):
         self.app = app_from_object(self)
+        # The model can be supplied as a kwarg (when passed in as a URL aprameter) or as an attribute
+        # if passed in as an arg to as_view(). This porvides two clean ways to supply a model to the
+        # rich view. If passed as an arg to as_view() it will already exist as self.model!
+        if not 'model' in self.kwargs and hasattr(self, 'model'): self.kwargs['model'] = self.model
         self.model = class_from_string(self, self.kwargs['model'])
 
         if isinstance(self, (CreateView, UpdateView)):
@@ -225,10 +229,10 @@ def dispatch_generic(self, request, *args, **kwargs):
             "Generic dispatch only for use by CreateView, UpdateView, ListView, DetailView, DeleteView, LoginView and TemplateView and derivatives.")
 
 
-def get_context_data_generic(self, *args, **kwargs):
+def get_context_data_generic_for_forms(self, *args, **kwargs):
     '''
     Augments the standard context with model and related model information
-    so that the template in well informed - and can do Javascript wizardry
+    so that the template in well informed - and can do JavaScript wizardry
     based on this information
 
     :param self: and instance of CreateView or UpdateView
@@ -461,21 +465,6 @@ class RichDetailView(DetailView):
         if callable(getattr(self, 'extra_context_provider', None)):
             context.update(self.extra_context_provider())
         return context
-
-# TODO: Ranks, Performances  etc. Fix edit forms
-# 1. No Creating allowed, only created when a Session is created. Need a way in model to say "no creation"
-# 2. On update, some fields are editable, others not (like the name of a team can be changed, but not its members)
-#    We currently list only editable fields. We should list uneditable ones as well in the manner of a DetailView.
-#
-# For Teams: edit Name, list players (which is the intrinsic_relations for the session form)
-# For Ranks: No edits at all, all edited via Sessions
-# For Performances: edit Partial Play Weighting only and display Session and Player (no edit).
-#
-# None of this should be super complicated because intent is to only edit these through
-# Session objects anyhow and the Team, Rank, Perfromance and related objects will not even
-# be available on production menues, only for the admin for drilling down
-# and debugging.
-
 
 def get_form_generic(self, return_mqfns=False):
     '''
@@ -991,7 +980,7 @@ class RichCreateView(CreateView):
     '''
     operation = 'add'
     dispatch = dispatch_generic
-    get_context_data = get_context_data_generic
+    get_context_data = get_context_data_generic_for_forms
     get_form = get_form_generic
     post = post_generic
     form_init = None
@@ -1098,7 +1087,7 @@ class RichUpdateView(UpdateView):
     '''
     operation = 'edit'
     dispatch = dispatch_generic
-    get_context_data = get_context_data_generic
+    get_context_data = get_context_data_generic_for_forms
     get_form = get_form_generic
     post = post_generic
     form_valid = form_valid_generic

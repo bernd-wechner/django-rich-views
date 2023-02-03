@@ -1,0 +1,36 @@
+{% load django-rich-views %}
+
+{# Centralised version management in the template #}
+{% setvar "3.5.1"  as version_JQuery %}  {# Note DAL breaks if we use 3.6.0 See: https://github.com/yourlabs/django-autocomplete-light/issues/1283#issuecomment-1063931256 #}
+{% setvar "4.0.13" as version_Select2 %}
+{% setvar "1.12.1" as version_JQueryUI %}
+{% setvar "1.12.0" as version_Underscore %}
+{% setvar "4.6.10" as version_Flatpickr %}
+{% setvar "2.3.0"  as version_Luxon %}
+
+{# JQuery #}
+{% if DEBUG_JQuery %}
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/{{version_JQuery}}/jquery.js" crossorigin="anonymous"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/select2/{{version_Select2}}/js/select2.full.js" crossorigin="anonymous"></script>
+	{# Provides .sortable() at very least. See https://jqueryui.com/demos/ #}
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/{{version_JQueryUI}}/jquery-ui.js" crossorigin="anonymous"></script>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/{{version_JQueryUI}}/jquery-ui.css" integrity="sha512-urpIFwfLI9ZDL81s6eJjgBF7LpG+ROXjp1oNwTj4gSlCw00KiV1rWBrfszV3uf5r+v621fsAwqvy1wRJeeWT/A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+{% else %}
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/{{version_JQuery}}/jquery.min.js" crossorigin="anonymous"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/select2/{{version_Select2}}/js/select2.full.min.js" crossorigin="anonymous"></script>
+	{# Provides .sortable() at very least. See https://jqueryui.com/demos/ #}
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/{{version_JQueryUI}}/jquery-ui.min.js" crossorigin="anonymous"></script>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/{{version_JQueryUI}}/jquery-ui.css" integrity="sha512-urpIFwfLI9ZDL81s6eJjgBF7LpG+ROXjp1oNwTj4gSlCw00KiV1rWBrfszV3uf5r+v621fsAwqvy1wRJeeWT/A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+{% endif %}
+
+{# Underscore library of useful functions #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/{{version_Underscore}}/underscore-min.js" crossorigin="anonymous"></script> 	{# Useful functions #}
+
+{# Bootstrap theme for select2 widget #}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/select2-bootstrap-theme/0.1.0-beta.10/select2-bootstrap.min.css" integrity="sha512-kq3FES+RuuGoBW3a9R2ELYKRywUEQv0wvPTItv3DSGqjpbNtGWVdvT8qwdKkqvPzT93jp8tSF4+oN4IeTEIlQA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+<script>$.fn.select2.defaults.set( "theme", "bootstrap" );</script>
+
+{# Configure DateTime inputs #}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/{{version_Luxon}}/luxon.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/{{version_Flatpickr}}/flatpickr.min.js"></script>

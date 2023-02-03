@@ -35,14 +35,17 @@ class IncludeVariant(template.Node):
     def render(self, context):
         try:
             words = self.token.split_contents()
-            variant = context.get(self.token.contents.split()[1], self.token.contents.split()[1])
+            variant = context.get(self.token.contents.split()[
+                                  1], self.token.contents.split()[1])
 
             path = context.template_name
             parts = splitext(path)
             words[1] = f"'{parts[0]}_{variant}{parts[1]}'"
 
-            include = do_include(self.parser, Token(self.token.token_type, " ".join(words)))
-            # A Django 4 fix: as of 4 it demands an origin that do_include does not provide!
+            include = do_include(self.parser, Token(
+                self.token.token_type, " ".join(words)))
+            # A Django 4 fix: as of 4 it demands an origin that do_include does
+            # not provide!
             include.origin = template.loader.get_template(path).origin
             return include.render(context)
         except template.TemplateDoesNotExist:
@@ -61,3 +64,33 @@ def include_variant(parser, token):
     '''
     return IncludeVariant(parser, token)
 
+
+@register.filter
+def checked(value, compare=None):
+    '''
+    Returns "checked" if the value is truthy, or if a compare value is provided if it matches that.
+    '''
+    if compare is None:
+        if value:
+            return "checked"
+        else:
+            return ""
+    else:
+        if value == compare:
+            return "checked"
+        else:
+            return ""
+
+
+@register.simple_tag
+def setvar(val=None):
+    '''
+    Used as follows:
+
+    {% setvar "value" as variable_name %}
+
+    and then applied with {{variable_name}}.
+
+    :param val: a value to set the variable to.
+    '''
+    return val

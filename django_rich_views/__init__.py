@@ -8,13 +8,13 @@ Django Rich Views
 
 Django provides some excellent generic class based views:
 
-    https://docs.djangoproject.com/en/1.10/topics/class-based-views/generic-display/
+    https://docs.djangoproject.com/en/dev/topics/class-based-views/generic-display/
 
 They are excellent for getting a site up and running really quickly from little more than a model specification.
 
 The admin site of course provides a rather excellent and complete version of generic database administration:
 
-    https://docs.djangoproject.com/en/1.10/ref/contrib/admin/
+    https://docs.djangoproject.com/en/dev/ref/contrib/admin/
 
 But (as at Django 4) the built in generic class based views fall somewhat short of complete and there is no clear
 support for rich objects.
@@ -25,7 +25,7 @@ What is a rich object?
     in a relational database table.
 
     Some objects though cannot meaningfully be represented in one table. They exist logically across a number
-    of tables. That is a rich object. Rich objects spance Django raltionships and tie many Simple objects together.
+    of tables. That is a rich object. Rich objects span Django relationships and tie many simple objects together.
 
     The textbook example is a good one to illustrate. Yes, imagine a literal database of texbooks ;-), better still
     anthologies, books that have many authors, in which each chapter has its own author say. Such  books are rich

@@ -27,6 +27,7 @@ from .util import isListValue, isDictionary, isPRE, emulatePRE, indentVAL, getAp
 from .datetime import time_str
 from .options import list_display_format, object_display_format, object_display_modes, flt, osf, odm, odf, lmf
 from .filterset import format_filterset
+from django.urls.exceptions import NoReverseMatch
 
 NEVER = pytz.utc.localize(datetime.min)  # Used for times to indicate never (intentionally the minimal time as never is less than any time)
 
@@ -283,15 +284,24 @@ def list_html_output(self, LDF=None):
     # This evaluates the queryset
     i = 1
     for o in self.queryset:
-        url_view = reverse('view', kwargs={'model': self.kwargs['model'], 'pk': o.pk})
-        url_edit = reverse('edit', kwargs={'model': self.kwargs['model'], 'pk': o.pk})
-        url_delete = reverse('delete', kwargs={'model': self.kwargs['model'], 'pk': o.pk})
+        try:
+            url_view = reverse('view', kwargs={'model': self.kwargs['model'], 'pk': o.pk})
 
-        # The view url is special. It should conserve filters and ordering so that the
-        # detail view browses (prior/next links) within the ordered filtered view.
-        if getattr(self, 'filterset', False):
-            filters = format_filterset(self.filterset, as_text=False)
-            url_view += "?" + "&".join(filters)
+            if getattr(self, 'filterset', False):
+                filters = format_filterset(self.filterset, as_text=False)
+                url_view += "?" + "&".join(filters)
+        except NoReverseMatch:
+            url_view = None
+
+        try:
+            url_edit = reverse('edit', kwargs={'model': self.kwargs['model'], 'pk': o.pk})
+        except NoReverseMatch:
+            url_edit = None
+
+        try:
+            url_delete = reverse('delete', kwargs={'model': self.kwargs['model'], 'pk': o.pk})
+        except NoReverseMatch:
+            url_delete = None
 
         if self.request.user.is_authenticated:
             html_menu = menu.format(view=url_view, edit=url_edit, delete=url_delete)

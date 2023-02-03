@@ -1,0 +1,37 @@
+{% comment %}
+
+	A simple little template to include in a rich list view, which maps context variabes to JS variables
+	and then includes the Javascript.
+
+	Include it with:
+
+		{% include "django-rich-views/include/list_js.html" %}
+
+	Provides support for the variaous rich display options.
+
+{% endcomment %}
+
+{% load static %}
+
+<script>
+	const filters	       = {{filters|safe}};
+	const default_elements = "{{format_default.object_summary_format}}";
+	const default_complete = "{{format_default.object_display_modes}}";
+	const default_link     = "{{format_default.field_link_target}}";
+	const default_menus    = "{{format_default.list_menu_format}}";
+	const default_index    = "{{format_default.index}}";
+	const default_key      = "{{format_default.key}}";
+	const default_ordering = "{{ordering_default}}";
+
+	let URL_ajax;
+	let URL_page;
+
+	// Save the URL when we load for later use
+	function saveURLs() {
+		URL_ajax = "{% url 'get_list_html' model=model_name %}";
+		URL_page = window.location.href.split('?')[0];
+	}
+	window.onload = saveURLs;
+</script>
+
+<script src="{% static 'django-rich-views/js/list.js' %}">	</script>

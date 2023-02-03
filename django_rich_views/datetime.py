@@ -4,7 +4,8 @@ Django Rich Views
 Datetime management
 '''
 # Python imports
-import pytz, re
+import pytz
+import re
 from datetime import datetime, timedelta
 from dateutil import parser
 
@@ -20,7 +21,8 @@ def safe_tz(tz):
 
 def datetime_format_python_to_PHP(python_format_string):
     '''Given a python datetime format string, attempts to convert it to the nearest PHP datetime format string possible.'''
-    python2PHP = {"%a": "D", "%a": "D", "%A": "l", "%b": "M", "%B": "F", "%c": "", "%d": "d", "%H": "H", "%I": "h", "%j": "z", "%m": "m", "%M": "i", "%p": "A", "%S": "s", "%U": "", "%w": "w", "%W": "W", "%x": "", "%X": "", "%y": "y", "%Y": "Y", "%Z": "e", "%z": "O" }
+    python2PHP = {"%a": "D", "%a": "D", "%A": "l", "%b": "M", "%B": "F", "%c": "", "%d": "d", "%H": "H", "%I": "h", "%j": "z", "%m": "m",
+                  "%M": "i", "%p": "A", "%S": "s", "%U": "", "%w": "w", "%W": "W", "%x": "", "%X": "", "%y": "y", "%Y": "Y", "%Z": "e", "%z": "O"}
 
     php_format_string = python_format_string
     for py, php in python2PHP.items():
@@ -90,8 +92,7 @@ def make_aware(date_time, timezone=None):
 def decodeDateTime(dt, test=False):
     '''
     decodes a DateTime that was URL encoded.
-    Has to agree with the URL encoding chosen by the Javascript that
-    fetches leaderboards though an AJAX call of course.
+    Has to agree with the URL encoding used by an AJAX caller of course.
 
     The colons are encoded as : - Works on Chrome even though it's
     a reserved character not encouraged for URL use.
@@ -127,15 +128,17 @@ def decodeDateTime(dt, test=False):
     # Seconds are optional inside of na optiona time group
     # Date is mandatory
     pattern = (r"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})"
-               +"(([T\s](?P<hour>\d{2})[:-](?P<minutes>\d{2}))?([:-](?P<seconds>\d{2}))?)?"
-               +"\s?"
-               +"((?P<offset_sign>[\s+-])(?P<offset_hours>\d{2})[:-]?(?P<offset_minutes>\d{2}))?$")
+               + "(([T\s](?P<hour>\d{2})[:-](?P<minutes>\d{2}))?([:-](?P<seconds>\d{2}))?)?"
+               + "\s?"
+               + "((?P<offset_sign>[\s+-])(?P<offset_hours>\d{2})[:-]?(?P<offset_minutes>\d{2}))?$")
 
-    if m := re.match(pattern, dt):
+    if m:= re.match(pattern, dt):
         p = m.groupdict()
         decoded = f"{p['year']}-{p['month']}-{p['day']}"
-        if not p.get('hour', None) is None: decoded += f" {p['hour']}:{p['minutes']}"
-        if not p.get('seconds', None) is None: decoded += f":{p['seconds']}"
+        if not p.get('hour', None) is None:
+            decoded += f" {p['hour']}:{p['minutes']}"
+        if not p.get('seconds', None) is None:
+            decoded += f":{p['seconds']}"
         if not p.get('offset_sign', None) is None:
             sign = '+' if p['offset_sign'] in ('+', ' ') else '-'
             decoded += f" {sign}{p['offset_hours']}:{p['offset_minutes']}"
