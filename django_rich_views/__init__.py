@@ -163,7 +163,7 @@ RichCreateView and RichUpdateView
 
     related_forms.Member.name
     related_forms.Member.related_forms.Issue.description
-        related_forms.Pet.name
+    related_forms.Pet.name
     related_forms.Pet.related_forms.Issue.description
 
     as the form widgets for those fields respectively.
