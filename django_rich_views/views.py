@@ -33,29 +33,31 @@ from django.urls import reverse_lazy
 from django.db import transaction
 # from django.db.models.query import QuerySet
 from django.db.utils import IntegrityError, ProgrammingError
+from django.db.models import Q
+from django.db.models.aggregates import Count
 from django.http.response import HttpResponse, HttpResponseRedirect  # , JsonResponse
 from django.template.response import TemplateResponse
-from django.http.request import QueryDict
+#from django.http.request import QueryDict
 from django.forms.models import fields_for_model, ModelChoiceField, ModelMultipleChoiceField
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 
 # 3rd Party package imports (dependencies)
-from url_filter.filtersets import ModelFilterSet
-from url_filter.constants import StrictMode
+#from url_filter.filtersets import ModelFilterSet
+#from url_filter.constants import StrictMode
 from dal import autocomplete, forward
 
 # Package imports
 from .logs import logger as log
 from .forms import classify_widgets
-from .util import app_from_object, class_from_string
+from .util import app_from_object, class_from_string, is_to_many
 from .html import list_html_output, object_html_output, object_as_html, object_as_table, object_as_ul, object_as_p, object_as_br
 from .context import add_model_context, add_timezone_context, add_format_context, add_filter_context, add_ordering_context, add_debug_context
 from .options import get_list_display_format, get_object_display_format
 from .neighbours import get_neighbour_pks
 from .model import collect_rich_object_fields, inherit_fields, intrinsic_relations
 from .related_forms import RelatedForms
-from .filterset import format_filterset, is_filter_field
+from .filterset import get_filterset, format_filterset, is_filter_field
 
 if settings.DEBUG:
     import sys
@@ -72,107 +74,6 @@ if settings.DEBUG:
 #
 # sys.settrace(trace_func)
 # print(f'DEBUG: current trace function in {os.getpid()}', sys.gettrace())
-
-
-def get_filterset(self):
-    FilterSet = type("FilterSet", (ModelFilterSet,), {
-        'Meta': type("Meta", (object,), {
-            'model': self.model
-        })
-    })
-
-    qs = self.model.objects.all()
-
-    # Create a mutable QueryDict (default ones are not mutable)
-    qd = QueryDict('', mutable=True)
-
-    # Add the GET parameters unconditionally, a user request overrides a
-    # session saved filter
-    if hasattr(self.request, 'GET'):
-        qd.update(self.request.GET)
-
-    # Use the session stored filter as a fall back, it is expected
-    # in session["filter"] as a dictionary of (pseudo) fields and
-    # values. That is to say, they are  nominally fields in the model,
-    # but don't need to be, as long as they are keys into
-    # session["filter_priorities"] which defines prioritised lists of
-    # fields for that key. We do that because the same thing (that a
-    # pseudo field or key describes) may exist in different models in
-    # different fields of different names. Commonly the case when
-    # spanning relationships to get from this model to the pseudo field.
-    #
-    # To cut a fine example consider an Author model and a Book model,
-    # in which the Author has name and each book has a name and a ForeignKey
-    # related field author__name. We might have a psuedo field authors_name
-    # as the key and a list of filter_priorities of [author__name, name]
-    # And so if this model has author__name we use than and if not if it has
-    # name we use that. Clearly this cannot cover all confusions and requires
-    # careful model, field and filter design to support a clear naming
-    # convention ...
-    session = self.request.session
-    if 'filter' in session:
-        model = self.model
-
-        # the session filters we make a copy of as we may be modifying them
-        # based on the filter_priorities, and don't want to modify
-        # the session stored filters (our mods are only used for
-        # selecting the model field to filter on based on stated
-        # priorities).
-        session_filters = session["filter"].copy()
-        priorities = session.get("filter_priorities", {})
-
-        # Now if priority lists are supplied we apply them keeping only the highest
-        # priority field in any priority list in the list of priorities. The highest
-        # priority one being the lowest index in the list that list which is a field
-        # we can filter on.
-        for f in session["filter"]:
-            if f in priorities:
-                p = priorities[f]
-
-                # From the list of priorites, find the highest priority one that
-                # is a field we could actually filter on
-                filter_field = None
-                for field in p:
-                    if is_filter_field(model, field):
-                        filter_field = field
-                        break
-
-                # If we found one or more fields in the priority list that are
-                # filterable we must now have the highest priority one, we replace
-                # the pseudo filter field with this field.
-                if filter_field and not filter_field == f:
-                    val = session_filters[f]
-                    del session_filters[f]
-                    session_filters[filter_field] = val
-
-        # Te GET filters were already added to qd, so before we add session filters
-        # we throw out any that are already in there as we provide priority to
-        # user specified filters in the GET params over the session defined
-        # fall backs.
-        F = session_filters.copy()
-        for f in session_filters:
-            if f in qd:
-                del F[f]
-
-        if F:
-            qd.update(F)
-
-    # TODO: test this with GET params and session filter!
-    fs = FilterSet(data=qd, queryset=qs, strict_mode=StrictMode.fail)
-
-    # get_specs raises an Empty exception if there are no specs, and a
-    # ValidationError if a value is illegal
-    try:
-        specs = fs.get_specs()
-    except Exception as E:
-        specs = []
-
-    if len(specs) > 0:
-        fs.fields = format_filterset(fs)
-        fs.text = format_filterset(fs, as_text=True)
-        return fs
-    else:
-        return None
 
 
 def get_ordering(self):
@@ -194,8 +95,10 @@ def dispatch_generic(self, request, *args, **kwargs):
         self.app = app_from_object(self)
         # The model can be supplied as a kwarg (when passed in as a URL aprameter) or as an attribute
         # if passed in as an arg to as_view(). This porvides two clean ways to supply a model to the
-        # rich view. If passed as an arg to as_view() it will already exist as self.model!
-        if not 'model' in self.kwargs and hasattr(self, 'model'): self.kwargs['model'] = self.model
+        # rich view. If passed as an arg to as_view() it will already exist as
+        # self.model!
+        if not 'model' in self.kwargs and hasattr(self, 'model'):
+            self.kwargs['model'] = self.model
         self.model = class_from_string(self, self.kwargs['model'])
 
         if isinstance(self, (CreateView, UpdateView)):
@@ -354,7 +257,7 @@ class RichListView(ListView):
             # If the URL has GET parameters (following a ?) then self.request.GET
             # will contain a dictionary of name: value pairs that FilterSet uses
             # construct a new filtered queryset.
-            fs = get_filterset(self)
+            fs = get_filterset(self.request, self.model)
 
         # If there is a filter specified in the URL
         if fs:
@@ -364,7 +267,67 @@ class RichListView(ListView):
             self.queryset = self.model.objects.all()
 
         if (self.ordering):
-            self.queryset = self.queryset.order_by(*self.ordering)
+            # We clean the list of ordering fields, removing invalid entries and
+            # annotating the query with a count for To_Many fields so we can order_
+            # by on that annotation. That count should inherit any valid filters
+            # we configure above.
+            ordering = []
+            for field_name in self.ordering:
+                # TODO: We can order games by 'sessions' which translates to a Count, Tick.
+                # But can we filter that count by League and keep it generic, The sessions
+                # have a 'league' and so we might support an in house syntax?
+                # ordering=sessions__league=id
+                # OR, here's a better idea, if there's a filter, which we can tell if fs.get_specs()
+                # has any entries, then we could apply that filter comehow to the Count maybe?
+                # IFF the filter spec makes sense there, and IFF there's a way to aggregate filtered
+                # session (an F or Q expression?)
+                # YES!
+                # https://docs.djangoproject.com/en/dev/ref/models/conditional-expressions/#conditional-aggregation
+                if field_name.startswith('-'):
+                    real_field_name = field_name[1:]
+                    desc = True
+                else:
+                    real_field_name = field_name
+                    desc = False
+
+                field = getattr(self.model, real_field_name, None)
+
+                if field:
+                    if is_to_many(field):
+                        count_filter = None
+                        fspecs = fs.get_specs()
+                        if fspecs:
+                            for fspec in fspecs:
+                                # self.model is Game
+                                # self.model.sessions.rel.related_model() is Session
+                                #    this is field.rel.related_model()
+                                # real_field_name is sessions
+                                # fspec.components is ['leagues', 'id']
+                                rel_model = field.rel.related_model
+                                rel_fs = get_filterset(self.request, rel_model)
+                                rel_specs = rel_fs.get_specs()
+                                rel_filters = [
+                                    "__".join([real_field_name] + rel_spec.components) for rel_spec in rel_specs]
+                                rel_values = [
+                                    rel_spec.value for rel_spec in rel_specs]
+                                count_filter = Q()
+                                for f, v in zip(rel_filters, rel_values):
+                                    count_filter &= Q(**{f: v})
+
+                        ordering_name = f"count_{field_name}"
+                        ordering.append(('-' if desc else '') + ordering_name)
+
+                        if count_filter is None:
+                            kwarg = {ordering_name: Count(real_field_name)}
+                        else:
+                            kwarg = {ordering_name: Count(
+                                real_field_name, filter=count_filter)}
+
+                        self.queryset = self.queryset.annotate(**kwarg)
+                    else:
+                        ordering.append(field_name)
+
+            self.queryset = self.queryset.order_by(*ordering)
 
         if settings.DEBUG:
             log.debug(f"ordering  = {self.ordering}")
@@ -419,7 +382,7 @@ class RichDetailView(DetailView):
         self.ordering = get_ordering(self)
 
         # Get Neighbour info for the object browser
-        self.filterset = get_filterset(self)
+        self.filterset = get_filterset(self.request, self.model)
 
         neighbours = get_neighbour_pks(
             self.model, self.pk, filterset=self.filterset, ordering=self.ordering)
@@ -465,6 +428,7 @@ class RichDetailView(DetailView):
         if callable(getattr(self, 'extra_context_provider', None)):
             context.update(self.extra_context_provider())
         return context
+
 
 def get_form_generic(self, return_mqfns=False):
     '''

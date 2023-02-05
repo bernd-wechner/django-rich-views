@@ -24,7 +24,8 @@ class TimezoneMiddleware(object):
 
     def __call__(self, request):
         if "timezone" in request.session:
-            timezone.activate(request.session.get('timezone', settings.TIME_ZONE))
+            timezone.activate(request.session.get(
+                'timezone', settings.TIME_ZONE))
         else:
             timezone.activate(settings.TIME_ZONE)
 

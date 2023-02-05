@@ -18,6 +18,12 @@ import re
 # Django imports
 from django.utils.formats import localize
 from django.utils.safestring import mark_safe
+from django.http.request import QueryDict
+from django.db.models.query_utils import DeferredAttribute
+
+# Other imports
+from url_filter.filtersets import ModelFilterSet
+from url_filter.constants import StrictMode
 
 operation_text = {
     "exact": " = ",
@@ -49,7 +55,7 @@ operation_text = {
     #         "hour" : "__hour",
     #         "minute" : "__minute",
     #         "second" : "__second",
-    }
+}
 
 
 def fix(obj):
@@ -71,6 +77,126 @@ def fix(obj):
         return re.sub(r'(\+|\-)(\d\d):(\d\d)$', r'\1\2\3', str(obj))
     else:
         return str(obj)
+
+
+def get_filterset(request, model):
+    '''
+    Returns a ModelFilterSet (from url_filter) that is built from
+    the GET params and the session stored filter(s).
+
+    In the session supports "filter" and "filter_priorities". The latter
+    is just a dict supplying a of field names to try "filter" if "filter"
+    is not a field on the model. This means for example you specify a generic
+    name for a filter that is implemented on different models in different
+    fields. The fields can be related too (so in a related model).
+
+    Each entry in priorities is test in order to see if is_filter_field is
+    True, and if so that is the field used. is_filter_field suppports
+    related model fields (components seprated with "__")
+
+    the model and request are taken from the view, unless overrriden, a
+    mechanism making these tailored filtersets available more gnerally from
+    places without a view object.
+
+    :param request: The Django request that specifies (or not) a filter
+    :param model: The model the filter applies to
+    '''
+    FilterSet = type("FilterSet", (ModelFilterSet,), {
+        'Meta': type("Meta", (object,), {
+            'model': model
+        })
+    })
+
+    qs = model.objects.all()
+
+    # Create a mutable QueryDict (default ones are not mutable)
+    qd = QueryDict('', mutable=True)
+
+    # Add the GET parameters unconditionally, a user request overrides a
+    # session saved filter
+    if hasattr(request, 'GET'):
+        qd.update(request.GET)
+
+    # Use the session stored filter as a fall back, it is expected
+    # in session["filter"] as a dictionary of (pseudo) fields and
+    # values. That is to say, they are  nominally fields in the model,
+    # but don't need to be, as long as they are keys into
+    # session["filter_priorities"] which defines prioritised lists of
+    # fields for that key. We do that because the same thing (that a
+    # pseudo field or key describes) may exist in different models in
+    # different fields of different names. Commonly the case when
+    # spanning relationships to get from this model to the pseudo field.
+    #
+    # To cut a fine example consider an Author model and a Book model,
+    # in which the Author has name and each book has a name and a ForeignKey
+    # related field author__name. We might have a psuedo field authors_name
+    # as the key and a list of filter_priorities of [author__name, name]
+    # And so if this model has author__name we use than and if not if it has
+    # name we use that. Clearly this cannot cover all confusions and requires
+    # careful model, field and filter design to support a clear naming
+    # convention ...
+    session = request.session
+    if 'filter' in session:
+        # the session filters we make a copy of as we may be modifying them
+        # based on the filter_priorities, and don't want to modify
+        # the session stored filters (our mods are only used for
+        # selecting the model field to filter on based on stated
+        # priorities).
+        session_filters = session["filter"].copy()
+        priorities = session.get("filter_priorities", {})
+
+        # Now if priority lists are supplied we apply them keeping only the highest
+        # priority field in any priority list in the list of priorities. The highest
+        # priority one being the lowest index in the list that list which is a field
+        # we can filter on.
+        for f in session["filter"]:
+            if f in priorities:
+                p = priorities[f]
+
+                # From the list of priorites, find the highest priority one that
+                # is a field we could actually filter on
+                filter_field = None
+                for field in p:
+                    if is_filter_field(model, field):
+                        filter_field = field
+                        break
+
+                # If we found one or more fields in the priority list that are
+                # filterable we must now have the highest priority one, we replace
+                # the pseudo filter field with this field.
+                if filter_field and not filter_field == f:
+                    val = session_filters[f]
+                    del session_filters[f]
+                    session_filters[filter_field] = val
+
+        # The GET filters were already added to qd, so before we add session filters
+        # we throw out any that are already in there as we provide priority to
+        # user specified filters in the GET params over the session defined
+        # fall backs.
+        F = session_filters.copy()
+        for f in session_filters:
+            if f in qd:
+                del F[f]
+
+        if F:
+            qd.update(F)
+
+    # TODO: test this with GET params and session filter!
+    fs = FilterSet(data=qd, queryset=qs, strict_mode=StrictMode.fail)
+
+    # get_specs raises an Empty exception if there are no specs, and a
+    # ValidationError if a value is illegal
+    try:
+        specs = fs.get_specs()
+    except Exception as E:
+        specs = []
+
+    if len(specs) > 0:
+        fs.fields = format_filterset(fs)
+        fs.text = format_filterset(fs, as_text=True)
+        return fs
+    else:
+        return None
 
 
 def get_field(model, components, component=0):
@@ -95,14 +221,16 @@ def get_field(model, components, component=0):
     if hasattr(field, "rel"):
         if component + 1 < len(components):
             if field.rel.many_to_many:
-                field = get_field(field.field.related_model, components, component + 1)
+                field = get_field(field.field.related_model,
+                                  components, component + 1)
             elif field.rel.one_to_many:
                 field = get_field(field.field.model, components, component + 1)
 
     # To One fields
     elif hasattr(field, "field"):
         if component + 1 < len(components):
-            field = get_field(field.field.related_model, components, component + 1)
+            field = get_field(field.field.related_model,
+                              components, component + 1)
 
     # local model field
     else:
@@ -140,30 +268,42 @@ def format_filterset(filterset, as_text=False):
     result = []
 
     try:
-        # get_specs raises an Empty exception if there are no specs, and a ValidationError if a value is illegal
+        # get_specs raises an Empty exception if there are no specs, and a
+        # ValidationError if a value is illegal
         specs = filterset.get_specs()
 
         for spec in specs:
             field = get_field(filterset.queryset.model, spec.components)
-            if len(spec.components) > 1 and spec.lookup == "exact":
-                Os = field.model.objects.filter(**{"{}__{}".format(field.attname, spec.lookup):spec.value})
-                O = Os[0] if Os.count() > 0 else None
+            field_name = None
 
-                if as_text:
-                    if field.primary_key:
-                        field_name = field.model._meta.object_name
-                        field_value = str(O)
+            if len(spec.components) > 1 and spec.lookup == "exact":
+                # The field may be deferred in which case it's attributes
+                # accessible as field.field
+                if isinstance(field, DeferredAttribute):
+                    field = field.field
+
+                if field.model:
+                    Os = field.model.objects.filter(
+                        **{f"{field.attname}__{spec.lookup}": spec.value})
+                    O = Os[0] if Os.count() > 0 else None
+
+                    if as_text:
+                        if field.primary_key:
+                            field_name = field.model._meta.object_name
+                            field_value = str(O)
+                        else:
+                            field_name = "{} {}".format(
+                                field.model._meta.object_name, spec.components[-1])
+                            field_value = spec.value
                     else:
-                        field_name = "{} {}".format(field.model._meta.object_name, spec.components[-1])
-                        field_value = spec.value
-                else:
-                    if field.primary_key:
-                        field_name = "__".join(spec.components[:-1])
-                        field_value = O.pk
-                    else:
-                        field_name = "__".join(spec.components)
-                        field_value = spec.value
-            else:
+                        if field.primary_key:
+                            field_name = "__".join(spec.components[:-1])
+                            field_value = O.pk
+                        else:
+                            field_name = "__".join(spec.components)
+                            field_value = spec.value
+
+            if field_name is None:
                 if as_text:
                     field_name = field.verbose_name
                 else:
@@ -173,7 +313,8 @@ def format_filterset(filterset, as_text=False):
                 # In as_text mode, localize them. In normal mode fix the str representation.
                 # One for convenience and nicety, the other to get around a round-trip bug
                 # in Python 3.6 and earlier!
-                field_value = (localize(spec.value) if isinstance(spec.value, datetime.datetime) else str(spec.value)) if as_text else urllib.parse.quote_plus(fix(spec.value))
+                field_value = (localize(spec.value) if isinstance(spec.value, datetime.datetime) else str(
+                    spec.value)) if as_text else urllib.parse.quote_plus(fix(spec.value))
 
             if as_text and spec.lookup in operation_text:
                 op = operation_text[spec.lookup]
@@ -188,5 +329,5 @@ def format_filterset(filterset, as_text=False):
             result = mark_safe(" <b>and</b> ".join(result))
 
         return result
-    except:
+    except Exception as E:
         return "" if as_text else []

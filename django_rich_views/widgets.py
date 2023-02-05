@@ -195,13 +195,19 @@ class OrderingWidget(SelectMultiple):
             choices = []
             if len(requested) > 0:
                 for fieldname, option in requested.items():
-                    choices.append((option, fields[fieldname].verbose_name))
+                    verbose_name = getattr(fields[fieldname], 'verbose_name', None)
+                    if not verbose_name: verbose_name = getattr(fields[fieldname], 'related_name', None)
+                    if not verbose_name: verbose_name = getattr(fields[fieldname], 'name', fieldname)
+                    choices.append((option, verbose_name))
                     if fieldname in defaults:
                         del defaults[fieldname]
 
             if len(defaults) > 0:
                 for fieldname, option in defaults.items():
-                    choices.append(("~" + fieldname, fields[fieldname].verbose_name))  # By default, disabled with ~ prefix
+                    verbose_name = getattr(fields[fieldname], 'verbose_name', None)
+                    if not verbose_name: verbose_name = getattr(fields[fieldname], 'related_name', None)
+                    if not verbose_name: verbose_name = getattr(fields[fieldname], 'name', fieldname)
+                    choices.append(("~" + fieldname, verbose_name))  # By default, disabled with ~ prefix
 
             kwargs["choices"] = choices
 
