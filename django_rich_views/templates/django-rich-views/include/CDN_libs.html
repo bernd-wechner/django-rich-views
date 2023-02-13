@@ -7,6 +7,8 @@
 {% setvar "1.12.0" as version_Underscore %}
 {% setvar "4.6.10" as version_Flatpickr %}
 {% setvar "2.3.0"  as version_Luxon %}
+{% setvar "5.2.3"  as version_Bootstrap %}
+{% setvar "2.11.6"  as version_Popper %}
 
 {# JQuery #}
 {% if DEBUG_JQuery %}
@@ -39,3 +41,10 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/{{version_Luxon}}/luxon.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/{{version_Flatpickr}}/flatpickr.min.js"></script>
+
+{# Bootstrap JS #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/{{version_Popper}}/umd/popper.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/{{version_Bootstrap}}/js/bootstrap.bundle.min.js"></script>
+
+{# Bootstrap CSS #}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/{{version_Bootstrap}}/css/bootstrap.min.css" rel="stylesheet">

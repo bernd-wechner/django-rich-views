@@ -94,3 +94,30 @@ def setvar(val=None):
     :param val: a value to set the variable to.
     '''
     return val
+
+
+@register.simple_tag(takes_context=True)
+def active(context, view_name):
+    '''
+    A simple tag to return " active" or "" if the passed view name is in hte context as view_name.
+
+    Used for BootStrap Nav items:
+
+        https://getbootstrap.com/docs/5.2/components/navs-tabs/
+
+    Expects the 'view' in the Django context and is useful when the navs link to:
+
+        href="{% url '<view_name>' %}
+
+    Each nav can then use two Django template variables to configure a menu item with an active class
+    as need and link using setvar() above to avoid repetition (DRY):
+
+        {% setvar "home" as nav_target %}
+        <a class="nav-link{%active nav_target%}" data-toggle="pill" href="{% url nav_target %}">{{nav_target|title}}</a>
+
+    :param view_name: The name of the view to check for.
+    '''
+    if 'view' in context:
+        return ' active' if view_name == context['view'].request.resolver_match.view_name else ''
+    else:
+        return "ERROR: 'view' not in context."

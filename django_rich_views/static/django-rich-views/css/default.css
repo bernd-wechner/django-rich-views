@@ -30,3 +30,10 @@
 	height: 28px;
 	display: inline-block;
  }
+
+ .img_button {
+    height: 14px;  /* Should match default button height - TODO: is there a better way? */
+    padding: 0;
+    margin: 0;
+    vertical-align: bottom;
+}

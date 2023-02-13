@@ -192,7 +192,7 @@ class RichLoginView(LoginView):
         context = super().get_context_data(*args, **kwargs)
         add_timezone_context(self, context)
         if callable(getattr(self, 'extra_context_provider', None)):
-            context.update(self.extra_context_provider())
+            context.update(self.extra_context_provider(context))
         return context
 
     def form_valid(self, form):
@@ -212,7 +212,7 @@ class RichTemplateView(TemplateView):
         context = super().get_context_data(*args, **kwargs)
         add_timezone_context(self, context)
         if callable(getattr(self, 'extra_context_provider', None)):
-            context.update(self.extra_context_provider())
+            context.update(self.extra_context_provider(context))
         return context
 
 
@@ -351,7 +351,7 @@ class RichListView(ListView):
         add_debug_context(self, context)
         context["total"] = self.model.objects.all().count
         if callable(getattr(self, 'extra_context_provider', None)):
-            context.update(self.extra_context_provider())
+            context.update(self.extra_context_provider(context))
         return context
 
 
@@ -426,7 +426,7 @@ class RichDetailView(DetailView):
         add_ordering_context(self, context)
         add_debug_context(self, context)
         if callable(getattr(self, 'extra_context_provider', None)):
-            context.update(self.extra_context_provider())
+            context.update(self.extra_context_provider(context))
         return context
 
 
@@ -1119,5 +1119,5 @@ class RichDeleteView(DeleteView):
         add_format_context(self, context)
         add_debug_context(self, context)
         if callable(getattr(self, 'extra_context_provider', None)):
-            context.update(self.extra_context_provider())
+            context.update(self.extra_context_provider(context))
         return context
