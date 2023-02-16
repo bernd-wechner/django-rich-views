@@ -1,8 +1,14 @@
+import json as JSON
+
 from os.path import splitext
 
 from django import template
 from django.template.loader_tags import do_include
 from django.template.base import Token, Origin
+from django.utils.safestring import mark_safe
+
+from django_rich_views.util import DjangoObjectJSONEncoder
+
 
 register = template.Library()
 
@@ -63,6 +69,11 @@ def include_variant(parser, token):
     :param token:
     '''
     return IncludeVariant(parser, token)
+
+
+@register.filter
+def json(value):
+    return mark_safe(JSON.dumps(value, cls=DjangoObjectJSONEncoder))
 
 
 @register.filter

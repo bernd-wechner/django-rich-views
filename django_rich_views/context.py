@@ -29,6 +29,22 @@ from .widgets import FilterWidget, OrderingWidget
 from .filterset import format_filterset
 
 
+def add_rich_context(view, context):
+    '''
+    Reserved for context available across the board in Django Rich Views that isn't easily
+    categorized in one of the providers below.
+
+    :param view:
+    :param context:
+    '''
+    # DRV provides includ/CDN_libs.html for central management of CDN libs
+    # Bootstrap is optional and can be requested in the settings and is passed
+    # to the context of Rich Views.
+    context["USE_BOOTSTRAP"] = getattr(settings,'USE_BOOTSTRAP', False)
+
+    return context
+
+
 def add_model_context(view, context, plural, title=False):
     '''
     Add some useful context information to views that reveal information about the model
@@ -38,7 +54,8 @@ def add_model_context(view, context, plural, title=False):
     '''
 
     if not isinstance(view, base.View):
-        raise ValueError("Internal Error: add_model_context requested with invalid view")
+        raise ValueError(
+            "Internal Error: add_model_context requested with invalid view")
 
     context.update(view.kwargs)
     if 'model' in context and hasattr(view, 'operation'):
@@ -46,8 +63,10 @@ def add_model_context(view, context, plural, title=False):
         context["model_name"] = context["view"].kwargs['model']
         context["model_name_plural"] = context["view"].model._meta.verbose_name_plural
         context["operation"] = view.operation
-        context["title"] = (title + ' ' if title else '') + (safetitle(context["model"]._meta.verbose_name_plural) if plural else safetitle(context["model"]._meta.verbose_name))
-        context["default_datetime_input_format"] = datetime_format_python_to_PHP(settings.DATETIME_INPUT_FORMATS[0])
+        context["title"] = (title + ' ' if title else '') + (safetitle(context["model"]._meta.verbose_name_plural)
+                                                             if plural else safetitle(context["model"]._meta.verbose_name))
+        context["default_datetime_input_format"] = datetime_format_python_to_PHP(
+            settings.DATETIME_INPUT_FORMATS[0])
 
         if len(view.request.GET) > 0:
             context["get_params"] = view.request.GET
@@ -70,7 +89,8 @@ def add_format_context(view, context):
     for each one.
     '''
     if not isinstance(view, base.View):
-        raise ValueError("Internal Error: add_model_context requested with invalid view")
+        raise ValueError(
+            "Internal Error: add_model_context requested with invalid view")
 
     if hasattr(view, "operation") and hasattr(view, "format"):
         # List views are simple
@@ -78,14 +98,17 @@ def add_format_context(view, context):
             context["format"] = view.format
             context["format_default"] = urldefaults
 
-        # Detail view support a richer array of options that we handle with more care
+        # Detail view support a richer array of options that we handle with
+        # more care
         elif view.operation == "view":
             # Detail views will want a dictionary of object_display_format settings to honor
             # when rendering display options if they opt do so.
             ODF = {}
             for setting in vars(odf):
-                if not setting.startswith("_"):  # Skip built-ins '__' and the summary settings '_'
-                    ODF[setting] = (view.format.flags & getattr(odf, setting)) > 0
+                # Skip built-ins '__' and the summary settings '_'
+                if not setting.startswith("_"):
+                    ODF[setting] = (view.format.flags &
+                                    getattr(odf, setting)) > 0
 
             context['format_flags'] = ODF
 
@@ -110,29 +133,12 @@ def add_format_context(view, context):
             # format modes
             ODM = {}
             for setting in vars(odm):
-                if not setting.startswith("_") and not setting.startswith("as_"):  # Skip built-ins ('__'), private attributes '_' and the enums ('as_')
+                # Skip built-ins ('__'), private attributes '_' and the enums
+                # ('as_')
+                if not setting.startswith("_") and not setting.startswith("as_"):
                     ODM[setting] = getattr(view.format.mode, setting)
 
             context['format_modes'] = ODM
-
-#             # enums (so that a template knows the values that the modes can take)
-#             ODME = {}  # Object Display Mode Enums
-#             for setting in vars(odm):
-#                 if setting.startswith("as_"):
-#                     ODME[setting] =  getattr(odm, setting)
-#
-#             # Not sure if these are ever useful in a template. But if so, they could be added.
-#             ODSE = {}  # Object Display Summary Enums
-#             for setting in vars(osf):
-#                 if not setting.startswith("_") :
-#                     ODSE[setting] =  getattr(osf, setting)
-#
-#             FE = {} # Format Enums
-#             FE['object'] = ODME.copy()
-#             FE['list_values'] = ODME.copy()
-#             FE['sum_format'] = ODSE.copy()
-#
-#             context['format_enums'] = FE
 
     return context
 
@@ -147,16 +153,20 @@ def add_filter_context(view, context):
     Detail view, only the neighbours for browsing (prior and next) are impacted
     '''
     if not isinstance(view, base.View):
-        raise ValueError("Internal Error: add_model_context requested with invalid view")
+        raise ValueError(
+            "Internal Error: add_model_context requested with invalid view")
 
-    context['widget_filters'] = FilterWidget(model=view.model, choices=view.request.GET)
+    context['widget_filters'] = FilterWidget(
+        model=view.model, choices=view.request.GET)
 
-    # Default empty value so templates can include Javascript "var filters    = {{filters}};" without issue.
+    # Default empty value so templates can include Javascript "var filters
+    # = {{filters}};" without issue.
     context["filters"] = mark_safe('""')
 
     if hasattr(view, 'filterset') and not view.filterset is None:
         context["filters"] = format_filterset(view.filterset, as_text=False)
-        context["filters_text"] = mark_safe(format_filterset(view.filterset, as_text=True))
+        context["filters_text"] = mark_safe(
+            format_filterset(view.filterset, as_text=True))
         context["filters_data"] = view.filterset.data
 
         specs = view.filterset.get_specs()
@@ -168,7 +178,8 @@ def add_filter_context(view, context):
             filters_specs[key] = val
 
         context["filters_specs"] = filters_specs
-        context["filters_query"] = sqlparse.format(str(view.filterset.filter().query), reindent=True, keyword_case='upper')
+        context["filters_query"] = sqlparse.format(
+            str(view.filterset.filter().query), reindent=True, keyword_case='upper')
 
     return context
 
@@ -185,9 +196,11 @@ def add_ordering_context(view, context):
     :param context:
     '''
     if not isinstance(view, base.View):
-        raise ValueError("Internal Error: add_model_context requested with invalid view.")
+        raise ValueError(
+            "Internal Error: add_model_context requested with invalid view.")
 
-    context['widget_ordering'] = OrderingWidget(model=view.model, choices=view.request.GET.get('ordering', None))
+    context['widget_ordering'] = OrderingWidget(
+        model=view.model, choices=view.request.GET.get('ordering', None))
 
     if hasattr(view, 'ordering') and not view.ordering is None:
         context["ordering"] = view.ordering
@@ -195,7 +208,8 @@ def add_ordering_context(view, context):
         context["ordering"] = ""
 
     if hasattr(view.model._meta, 'ordering'):
-        context["ordering_default"] = "ordering=" + ",".join(view.model._meta.ordering)
+        context["ordering_default"] = "ordering=" + \
+            ",".join(view.model._meta.ordering)
     else:
         context["ordering_default"] = ""
 
@@ -222,7 +236,8 @@ def add_timezone_context(view_request, context):
     elif isinstance(view_request, HttpRequest):
         request = view_request
     else:
-        raise ValueError("Internal Error: add_time_context requested with invalid view/request")
+        raise ValueError(
+            "Internal Error: add_time_context requested with invalid view/request")
 
     context['timezones'] = pytz.common_timezones
 
@@ -265,7 +280,8 @@ def add_debug_context(view_request, context):
     elif isinstance(view_request, HttpRequest):
         request = view_request
     else:
-        raise ValueError("Internal Error: add_time_context requested with invalid view/request")
+        raise ValueError(
+            "Internal Error: add_time_context requested with invalid view/request")
 
     context['DEBUG'] = settings.DEBUG
     context['debug_mode'] = request.session.get("debug_mode", False)
@@ -274,7 +290,8 @@ def add_debug_context(view_request, context):
     context['Django_version'] = django.__version__
 
     context['DAL_source'] = dal.__spec__.origin  # @UndefinedVariable
-    context['DAL_version'] = get_distribution("django-autocomplete-light").version
+    context['DAL_version'] = get_distribution(
+        "django-autocomplete-light").version
 
     context['DEBUG_JQuery'] = settings.DEBUG
     context['DEBUG_BokehJS'] = settings.DEBUG

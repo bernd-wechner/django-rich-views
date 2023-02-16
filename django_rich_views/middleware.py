@@ -15,7 +15,7 @@ class TimezoneMiddleware(object):
     configured timezeone.
 
     Make to to include it after 'django.contrib.auth.middleware.AuthenticationMiddleware'
-    inthe MIDDLEWARE setting as it needs request.user to be available.
+    in the MIDDLEWARE setting as it needs request.user to be available.
     '''
 
     def __init__(self, get_response):

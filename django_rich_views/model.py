@@ -67,10 +67,13 @@ __detail_str__,    are properties like __str__ that permit a model to supply dif
 TODO: Add __table_str__ which returns a TR, and if an arg is specified or if it's a class method perhaps a header TR
 '''
 # Python imports
-import html, collections, inspect
+import html
+import collections
+import inspect
 
 # Django imports
 from django.db import models
+from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils.functional import cached_property
 from django.utils.timezone import get_current_timezone
@@ -87,7 +90,8 @@ from .options import default, flt, osf, odf
 from .decorators import is_property_method
 from .html import odm_str
 
-summary_methods = ["__str__", "__verbose_str__", "__rich_str__", "__detail_str__"]
+summary_methods = ["__str__", "__verbose_str__",
+                   "__rich_str__", "__detail_str__"]
 
 
 def safe_get(model, pk):
@@ -176,7 +180,8 @@ def is_intrinsic_relation(model, field):
                 m = model._meta.object_name
                 rm = field.remote_field.model._meta.object_name
                 if settings.WARNINGS:
-                    log.warning(f"Warning: A {rm} model form is provided for {m}.{field.name} BUT formsets of {rm} for {m}.{field.name} cannot be saved (because {rm} has no ForeignKey back to {m} - which is a prerequisite for Django Formsets).")
+                    log.warning(
+                        f"Warning: A {rm} model form is provided for {m}.{field.name} BUT formsets of {rm} for {m}.{field.name} cannot be saved (because {rm} has no ForeignKey back to {m} - which is a prerequisite for Django Formsets).")
             return True
         # FIXME (ASAP): double check this and what it's about
         # Check my models for . syntax add related and try the form
@@ -233,7 +238,8 @@ def apply_sort_by(queryset):
     model = queryset.model
     if hasattr(model, 'sort_by'):
         try:
-            sort_lambda = "lambda obj: (obj." + ", obj.".join(model.sort_by) + ")"
+            sort_lambda = "lambda obj: (obj." + \
+                ", obj.".join(model.sort_by) + ")"
             return sorted(queryset, key=eval(sort_lambda))
         except Exception:
             return queryset
@@ -337,15 +343,17 @@ def field_render(field, link_target=None, sum_format=None):
             txt = f"{{{field._meta.model.__name__}.{field.pk}}}"
         else:
             txt = "{field_value}"
-            raise ValueError("Internal error, template format not supported for field.")
+            raise ValueError(
+                "Internal error, template format not supported for field.")
 
     if link_target == flt.template:
         tgt = f"{{link.{FIELD_LINK_CLASS}.{field._meta.model.__name__}.{field.pk}}}"
-        return  mark_safe(f"{tgt}{txt}{{link_end}}")  # Provides enough info for a template to build the link below.
+        # Provides enough info for a template to build the link below.
+        return mark_safe(f"{tgt}{txt}{{link_end}}")
     elif tgt is None:
         return mark_safe(txt)
     else:
-        return  mark_safe(f'<A href="{tgt}" class="{FIELD_LINK_CLASS}">{txt}</A>')
+        return mark_safe(f'<A href="{tgt}" class="{FIELD_LINK_CLASS}">{txt}</A>')
 
 
 def object_in_list_format(obj, context):
@@ -382,7 +390,8 @@ def collect_rich_object_fields(view):
     obtained through odm_str where privacy constraints are checked.
     '''
     # Build the list of fields
-    # fields_for_model includes ForeignKey and ManyToMany fields in the model definition
+    # fields_for_model includes ForeignKey and ManyToMany fields in the model
+    # definition
 
     # Fields are categorized as follows for convenience and layout and performance decisions
     #    flat or list
@@ -408,9 +417,11 @@ def collect_rich_object_fields(view):
 
     model_fields = collections.OrderedDict()  # Editable fields in the model
     internal_fields = collections.OrderedDict()  # Non-editable fields in the model
-    related_fields = collections.OrderedDict()  # Fields in other models related to this one
+    # Fields in other models related to this one
+    related_fields = collections.OrderedDict()
 
-    # Categorize all fields into one of the three buckets above (model, internal, related)
+    # Categorize all fields into one of the three buckets above (model,
+    # internal, related)
     for field in all_fields:
         if (is_list(field) and ODF & odf.list) or (not is_list(field) and ODF & odf.flat):
             if field.is_relation:
@@ -443,7 +454,8 @@ def collect_rich_object_fields(view):
                     properties.append(name)
 
     # List properties_methods, but respect the format request (list and flat selectors)
-    # Look for property_methods (those decorated with property_method and having defaults for all parameters)
+    # Look for property_methods (those decorated with property_method and
+    # having defaults for all parameters)
     property_methods = []
     if ODF & odf.methods:
         for method in inspect.getmembers(view.obj, predicate=is_property_method):
@@ -483,7 +495,8 @@ def collect_rich_object_fields(view):
             view.fields_flat[odf.summaries] = collections.OrderedDict()
 
     if ODF & odf.list:
-        view.fields_list = {}  # Fields that are list items (have multiple values)
+        # Fields that are list items (have multiple values)
+        view.fields_list = {}
         view.all_fields_list = collections.OrderedDict()
         if ODF & odf.model:
             view.fields_list[odf.model] = collections.OrderedDict()
@@ -504,7 +517,8 @@ def collect_rich_object_fields(view):
     # that not the pk. The question is which string (see object_list_format() for the
     # types of string we support).
     for field in all_fields:
-        # All fields in other models that point to this one should have an is_relation flag
+        # All fields in other models that point to this one should have an
+        # is_relation flag
 
         # These are the field types we can expect:
         #    flat
@@ -529,14 +543,17 @@ def collect_rich_object_fields(view):
             log.debug(f"Collecting Rich Object Field: {field.name}")
 
         bucket = (odf.model if field.name in model_fields
-            else odf.internal if field.name in internal_fields
-            else odf.related if field.name in related_fields
-            else None)
+                  else odf.internal if field.name in internal_fields
+                  else odf.related if field.name in related_fields
+                  else None)
 
         if not bucket is None:
             if is_list(field):
                 if ODF & odf.list:
-                    attname = field.name if hasattr(field, 'attname') else field.name + '_set' if field.related_name is None else field.related_name  # If it's a model field it has an attname attribute, else it's a _set atttribute
+                    # If it's a model field it has an attname attribute, else
+                    # it's a _set atttribute
+                    attname = field.name if hasattr(
+                        field, 'attname') else field.name + '_set' if field.related_name is None else field.related_name
 
                     field.is_list = True
                     field.label = safetitle(attname.replace('_', ' '))
@@ -544,7 +561,8 @@ def collect_rich_object_fields(view):
                     ros = apply_sort_by(getattr(view.obj, attname).all())
 
                     if len(ros) > 0:
-                        field.value = [odm_str(item, view.format.mode) for item in ros]
+                        field.value = [odm_str(item, view.format.mode)
+                                       for item in ros]
                     else:
                         field.value = NONE
 
@@ -555,12 +573,14 @@ def collect_rich_object_fields(view):
                     for f in field.flags:
                         bit = getattr(getattr(view.obj, field.name), f)
                         if bit.is_set:
-                            flags.append(getattr(view.obj, field.name).get_label(f))
+                            flags.append(
+                                getattr(view.obj, field.name).get_label(f))
                     field.is_list = False
                     field.label = safetitle(field.verbose_name)
 
                     if len(flags) > 0:
-                        field.value = odm_str(", ".join(flags), view.format.mode)
+                        field.value = odm_str(
+                            ", ".join(flags), view.format.mode)
                     else:
                         field.value = NONE
 
@@ -570,13 +590,15 @@ def collect_rich_object_fields(view):
                     field.is_list = False
                     field.label = safetitle(field.verbose_name)
 
-                    field.value = odm_str(getattr(view.obj, field.name), view.format.mode)
+                    field.value = odm_str(
+                        getattr(view.obj, field.name), view.format.mode)
                     if not str(field.value):
                         field.value = NOT_SPECIFIED
 
                     view.fields_flat[bucket][field.name] = field
 
-    # Capture all the property, property_method and summary values as needed (these are not fields)
+    # Capture all the property, property_method and summary values as needed
+    # (these are not fields)
     if ODF & odf.properties or ODF & odf.methods or ODF & odf.summaries:
         names = []
         if ODF & odf.properties:
@@ -618,9 +640,11 @@ def collect_rich_object_fields(view):
                         p.value = NONE
                     elif isDictionary(value):
                         # Value becomes Key: Value
-                        p.value = [f"{odm_str(k, view.format.mode)}: {odm_str(v, view.format.mode)}" for k, v in dict.items(value)]
+                        p.value = [
+                            f"{odm_str(k, view.format.mode)}: {odm_str(v, view.format.mode)}" for k, v in dict.items(value)]
                     else:
-                        p.value = [odm_str(val, view.format.mode) for val in list(value)]
+                        p.value = [odm_str(val, view.format.mode)
+                                   for val in list(value)]
                     view.fields_list[bucket][name] = p
             else:
                 if ODF & odf.flat:
@@ -628,7 +652,8 @@ def collect_rich_object_fields(view):
                     p.value = odm_str(value, view.format.mode, True)
                     view.fields_flat[bucket][name] = p
 
-    # Some more buckets to put the fields in so we can separate lists of fields on display
+    # Some more buckets to put the fields in so we can separate lists of
+    # fields on display
     view.fields = collections.OrderedDict()  # All fields
     view.fields_bucketed = collections.OrderedDict()
 
@@ -665,7 +690,17 @@ def collect_rich_object_fields(view):
                 view.fields[name] = value
 
 
-class TimeZoneMixIn(models.Model):
+class RichMixIn():
+    '''
+    A general mixin for Django Rich Views model support
+    '''
+
+    @cached_property
+    def link_internal(self) -> str:
+        return reverse('view', kwargs={"model": self._meta.model.__name__, "pk": self.pk})
+
+
+class TimeZoneMixIn():
     '''
     An abstract model that ensures timezone data is saved with all DateTimeField's that have
     a CharField of same name with _tz appended by placing the currentlya ctive Django timezone
@@ -689,4 +724,3 @@ class TimeZoneMixIn(models.Model):
 
     class Meta:
         abstract = True
-

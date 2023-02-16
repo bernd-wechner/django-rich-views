@@ -52,7 +52,7 @@ from .logs import logger as log
 from .forms import classify_widgets
 from .util import app_from_object, class_from_string, is_to_many
 from .html import list_html_output, object_html_output, object_as_html, object_as_table, object_as_ul, object_as_p, object_as_br
-from .context import add_model_context, add_timezone_context, add_format_context, add_filter_context, add_ordering_context, add_debug_context
+from .context import add_rich_context, add_model_context, add_timezone_context, add_format_context, add_filter_context, add_ordering_context, add_debug_context
 from .options import get_list_display_format, get_object_display_format
 from .neighbours import get_neighbour_pks
 from .model import collect_rich_object_fields, inherit_fields, intrinsic_relations
@@ -160,6 +160,7 @@ def get_context_data_generic_for_forms(self, *args, **kwargs):
             "Generic get_context_data only for use by CreateView or UpdateView derivatives.")
 
     # Now add some context extensions ....
+    add_rich_context(self, context)
     add_model_context(self, context, plural=False, title=title)
     add_timezone_context(self, context)
     add_debug_context(self, context)
@@ -210,6 +211,7 @@ class RichTemplateView(TemplateView):
 
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(*args, **kwargs)
+        add_rich_context(self, context)
         add_timezone_context(self, context)
         if callable(getattr(self, 'extra_context_provider', None)):
             context.update(self.extra_context_provider(context))
@@ -343,6 +345,7 @@ class RichListView(ListView):
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(*args, **kwargs)
 
+        add_rich_context(self, context)
         add_model_context(self, context, plural=True)
         add_timezone_context(self, context)
         add_format_context(self, context)
@@ -419,6 +422,7 @@ class RichDetailView(DetailView):
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(*args, **kwargs)
 
+        add_rich_context(self, context)
         add_model_context(self, context, plural=False)
         add_timezone_context(self, context)
         add_format_context(self, context)
@@ -1114,6 +1118,7 @@ class RichDeleteView(DeleteView):
     # the URL)
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(*args, **kwargs)
+        add_rich_context(self, context)
         add_model_context(self, context, plural=False, title='Delete')
         add_timezone_context(self, context)
         add_format_context(self, context)
