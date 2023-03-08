@@ -85,13 +85,14 @@ def class_from_string(app_name_or_object, class_name):
     Given the name of a Django app (or object declared in that Django app)
     and a string returns the model class with that name.
     '''
-    if isinstance(app_name_or_object, str):
-        module = apps.get_model(app_name_or_object, class_name)
-    else:
-        module = apps.get_model(app_from_object(
-            app_name_or_object), class_name)
-    return module
-
+    try:
+        if isinstance(app_name_or_object, str):
+            module = apps.get_model(app_name_or_object, class_name)
+        else:
+            module = apps.get_model(app_from_object(app_name_or_object), class_name)
+        return module
+    except LookupError:
+        return None
 
 def getApproximateArialStringWidth(st):
     '''

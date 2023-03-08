@@ -73,6 +73,7 @@ import inspect
 
 # Django imports
 from django.db import models
+from django.db.models.options import Options
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils.functional import cached_property
@@ -80,6 +81,10 @@ from django.utils.timezone import get_current_timezone
 from django.forms.models import inlineformset_factory
 from django.core.exceptions import ObjectDoesNotExist
 from django.conf import settings
+
+# Django related imports
+from markdownfield.models import MarkdownField, RenderedMarkdownField
+from markdownfield.validators import VALIDATOR_STANDARD
 
 # Package imports
 from . import FIELD_LINK_CLASS, NONE, NOT_SPECIFIED
@@ -415,6 +420,22 @@ def collect_rich_object_fields(view):
 
     all_fields = view.obj._meta.get_fields()  # All fields
 
+    # respect any ordering requested by model.field_order:
+    if hasattr(view.model, "field_order"):
+        field_order = view.model.field_order
+        all_field_names = [f.name for f in all_fields]
+        all_fields_ordered = []
+        for f in field_order:
+            if f in all_field_names:
+                all_fields_ordered.append(f)
+                all_field_names.pop(all_field_names.index(f))
+        # Add any fields no mentioned in field_order
+        for f in all_field_names:
+            all_fields_ordered.append(f)
+        # Now rebuild all_fields
+        all_fields_dict = {f.name: f for f in all_fields}
+        all_fields = [all_fields_dict[f] for f in all_fields_ordered]
+
     model_fields = collections.OrderedDict()  # Editable fields in the model
     internal_fields = collections.OrderedDict()  # Non-editable fields in the model
     # Fields in other models related to this one
@@ -699,7 +720,6 @@ class RichMixIn():
     def link_internal(self) -> str:
         return reverse('view', kwargs={"model": self._meta.model.__name__, "pk": self.pk})
 
-
 class TimeZoneMixIn():
     '''
     An abstract model that ensures timezone data is saved with all DateTimeField's that have
@@ -721,6 +741,46 @@ class TimeZoneMixIn():
     def save(self, *args, **kwargs):
         self.update_timezone_fields()
         super().save(*args, **kwargs)
+
+
+class NotesMixIn(models.Model):
+    '''
+    An abstract model that ensures a Markdown notes field is added to the model. Uses:
+
+    https://pypi.org/project/django-markdownfield/
+
+    and centralises that here for DRY reasons.
+    '''
+    notes = MarkdownField(rendered_field='notes_rendered', validator=VALIDATOR_STANDARD, null=True)
+    notes_rendered = RenderedMarkdownField(null=True)
+
+    __notes_mixin_marker__ = True
+
+    # This produces perfect field_order ... but field_rder seems unrespected on model :-(
+    def __new__(cls, *args, **kwargs):
+        mixin_fields = []
+        for base in cls.__bases__:
+            if hasattr(base, '__notes_mixin_marker__'):
+                mixin_fields += base._meta.fields
+        mixin_field_names = [f.name for f in mixin_fields]
+
+        model_fields = [f for f in cls._meta.get_fields() if f.name not in mixin_field_names]
+        field_order = []
+        for f in model_fields:
+            field_order.append(f.name)
+        field_order += [f.name for f in mixin_fields]
+
+        if hasattr(cls, 'field_order'):
+            existing_fields = list(cls.field_order)
+            existing_field_names = set(existing_fields)
+            for f in field_order:
+                if f not in existing_field_names:
+                    existing_fields.append(f)
+            cls.field_order = tuple(existing_fields)
+        else:
+            cls.field_order = tuple(field_order)
+
+        return super().__new__(cls)
 
     class Meta:
         abstract = True

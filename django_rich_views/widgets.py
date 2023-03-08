@@ -195,19 +195,21 @@ class OrderingWidget(SelectMultiple):
             choices = []
             if len(requested) > 0:
                 for fieldname, option in requested.items():
-                    verbose_name = getattr(fields[fieldname], 'verbose_name', None)
-                    if not verbose_name: verbose_name = getattr(fields[fieldname], 'related_name', None)
-                    if not verbose_name: verbose_name = getattr(fields[fieldname], 'name', fieldname)
-                    choices.append((option, verbose_name))
-                    if fieldname in defaults:
-                        del defaults[fieldname]
+                    if fieldname in fields:
+                        verbose_name = getattr(fields[fieldname], 'verbose_name', None)
+                        if not verbose_name: verbose_name = getattr(fields[fieldname], 'related_name', None)
+                        if not verbose_name: verbose_name = getattr(fields[fieldname], 'name', fieldname)
+                        choices.append((option, verbose_name))
+                        if fieldname in defaults:
+                            del defaults[fieldname]
 
             if len(defaults) > 0:
                 for fieldname, option in defaults.items():
-                    verbose_name = getattr(fields[fieldname], 'verbose_name', None)
-                    if not verbose_name: verbose_name = getattr(fields[fieldname], 'related_name', None)
-                    if not verbose_name: verbose_name = getattr(fields[fieldname], 'name', fieldname)
-                    choices.append(("~" + fieldname, verbose_name))  # By default, disabled with ~ prefix
+                    if fieldname in fields:
+                        verbose_name = getattr(fields[fieldname], 'verbose_name', None)
+                        if not verbose_name: verbose_name = getattr(fields[fieldname], 'related_name', None)
+                        if not verbose_name: verbose_name = getattr(fields[fieldname], 'name', fieldname)
+                        choices.append(("~" + fieldname, verbose_name))  # By default, disabled with ~ prefix
 
             kwargs["choices"] = choices
 

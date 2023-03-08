@@ -73,6 +73,9 @@ def add_model_context(view, context, plural, title=False):
     else:
         raise ValueError("Internal Error: Views must be provided at least 'model' in kwargs and an 'operation' argument. One or the other was missing. This is a site design error relating to defined urlpatterns which failed to provide on or the other.")
 
+    if hasattr(view, 'has_location'):
+        context['has_location'] = view.has_location
+
     return context
 
 

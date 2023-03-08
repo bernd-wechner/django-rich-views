@@ -35,6 +35,7 @@ from django.db import transaction
 from django.db.utils import IntegrityError, ProgrammingError
 from django.db.models import Q
 from django.db.models.aggregates import Count
+from django.http import Http404
 from django.http.response import HttpResponse, HttpResponseRedirect  # , JsonResponse
 from django.template.response import TemplateResponse
 #from django.http.request import QueryDict
@@ -46,6 +47,9 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 #from url_filter.filtersets import ModelFilterSet
 #from url_filter.constants import StrictMode
 from dal import autocomplete, forward
+from markdownfield.forms import MarkdownFormField
+from markdownfield.widgets import MDEWidget
+from mapbox_location_field.forms import LocationField
 
 # Package imports
 from .logs import logger as log
@@ -100,6 +104,9 @@ def dispatch_generic(self, request, *args, **kwargs):
         if not 'model' in self.kwargs and hasattr(self, 'model'):
             self.kwargs['model'] = self.model
         self.model = class_from_string(self, self.kwargs['model'])
+
+        if not self.model:
+            raise Http404("Invalid model name specified.")
 
         if isinstance(self, (CreateView, UpdateView)):
             if not hasattr(self, 'fields') or self.fields == None:
@@ -297,24 +304,25 @@ class RichListView(ListView):
                 if field:
                     if is_to_many(field):
                         count_filter = None
-                        fspecs = fs.get_specs()
-                        if fspecs:
-                            for fspec in fspecs:
-                                # self.model is Game
-                                # self.model.sessions.rel.related_model() is Session
-                                #    this is field.rel.related_model()
-                                # real_field_name is sessions
-                                # fspec.components is ['leagues', 'id']
-                                rel_model = field.rel.related_model
-                                rel_fs = get_filterset(self.request, rel_model)
-                                rel_specs = rel_fs.get_specs()
-                                rel_filters = [
-                                    "__".join([real_field_name] + rel_spec.components) for rel_spec in rel_specs]
-                                rel_values = [
-                                    rel_spec.value for rel_spec in rel_specs]
-                                count_filter = Q()
-                                for f, v in zip(rel_filters, rel_values):
-                                    count_filter &= Q(**{f: v})
+                        if fs:
+                            fspecs = fs.get_specs()
+                            if fspecs:
+                                for fspec in fspecs:
+                                    # self.model is Game
+                                    # self.model.sessions.rel.related_model() is Session
+                                    #    this is field.rel.related_model()
+                                    # real_field_name is sessions
+                                    # fspec.components is ['leagues', 'id']
+                                    rel_model = field.rel.related_model
+                                    rel_fs = get_filterset(self.request, rel_model)
+                                    rel_specs = rel_fs.get_specs()
+                                    rel_filters = [
+                                        "__".join([real_field_name] + rel_spec.components) for rel_spec in rel_specs]
+                                    rel_values = [
+                                        rel_spec.value for rel_spec in rel_specs]
+                                    count_filter = Q()
+                                    for f, v in zip(rel_filters, rel_values):
+                                        count_filter &= Q(**{f: v})
 
                         ordering_name = f"count_{field_name}"
                         ordering.append(('-' if desc else '') + ordering_name)
@@ -447,7 +455,7 @@ def get_form_generic(self, return_mqfns=False):
     the formset.
 
     A view attribute `unique_model_choice` is consulted. It should be
-    a list of model qualified dield names, which will receive a custom
+    a list of model qualified field names, which will receive a custom
     DAL forward declaration. There MUST be a Javascript Forward handler
     registered with that field's name for this to work on client side.
 
@@ -476,8 +484,23 @@ def get_form_generic(self, return_mqfns=False):
 
     unique_model_choice = getattr(self, 'unique_model_choice', [])
 
-    # Attach DAL (Django Autocomplete Light) Select2 widgets to all the model
-    # selectors
+    # If the model has a field_order attribute, and the form does not have one already
+    # Use the model field_ordering. DJango provides no way of specifying field_order
+    # in a model that is respected in the model form alas. So we use the model.field_order
+    # here to reorder the form fields.
+    if hasattr(model, "field_order") and getattr(form, "field_order", None) is None:
+        form.order_fields(model.field_order)
+
+    # Attach the MDE widget to all any markdown fields and note any LocationFields
+    self.has_location = False
+    for field_name, field in form.fields.items():
+        if isinstance(field, MarkdownFormField):
+            field.widget = MDEWidget()
+        if isinstance(field, LocationField):
+            self.has_location = True
+
+    # Attach DAL (Django Autocomplete Light) Select2
+    # widgets to all the model selectors
     mqfns = []
     for field_name, field in form.fields.items():
         if isinstance(field, ModelChoiceField):
@@ -505,6 +528,7 @@ def get_form_generic(self, return_mqfns=False):
 
                 field.widget.choices = field.choices
 
+    # Include forms for all intrinsic relations ...
     if len(intrinsic_relations(model)) > 0:
         if len(getattr(self.request, 'POST', [])) > 0:
             form_data = self.request.POST
@@ -523,12 +547,21 @@ def get_form_generic(self, return_mqfns=False):
 
         for related_model_name, related_form in related_forms.items():
             for field_name, field in related_form.fields.items():
+                # Attach the MDE widget to all any markdown fields and note any LocationFields
+                if isinstance(field, MarkdownFormField):
+                    field.widget = MDEWidget()
+                if isinstance(field, LocationField):
+                    self.has_location = True
+
+                # Attach DAL (Django Autocomplete Light) Select2
+                # widgets to all the model selectors
                 if isinstance(field, ModelChoiceField):
                     field_model = field.queryset.model
                     selector = getattr(field_model, "selector_field", None)
                     if not selector is None:
                         url = reverse_lazy('autocomplete', kwargs={
                                            "model": field_model.__name__, "field_name": selector})
+
                         qualified_field_name = f"{related_model_name}.{field_name}"
                         mqfns.append(qualified_field_name)
                         if qualified_field_name in unique_model_choice:
@@ -550,7 +583,7 @@ def get_form_generic(self, return_mqfns=False):
 
         form.related_forms = related_forms
 
-    # Classify the widgets on the form
+    # Classify the widgets on the form (atach HTML class attributes to them)
     classify_widgets(form)
 
     return mqfns if return_mqfns else form
@@ -956,10 +989,10 @@ class RichCreateView(CreateView):
     form_invalid = form_invalid_generic
 
     # Fields identified in this list will, if (and only if) they are a ModelChoiceField and a DAL widget is
-    # attached tot he field, have a forward configured that calls a forwardHandler as per:
+    # attached to the field, have a forward configured that calls a forwardHandler as per:
     # https://django-autocomplete-light.readthedocs.io/en/master/tutorial.html#customizing-forwarding-logic
     #
-    # A ForwardHandler must be regiustered in the client side Javascript with the name excludeModel or the DAL
+    # A ForwardHandler must be registered in the client side Javascript with the name excludeModel or the DAL
     # widget will fail because of an unregistered handler.
     unique_model_choice = []
 
@@ -1060,6 +1093,20 @@ class RichUpdateView(UpdateView):
     post = post_generic
     form_valid = form_valid_generic
     form_invalid = form_invalid_generic
+
+    # Fields identified in this list will, if (and only if) they are a ModelChoiceField and a DAL widget is
+    # attached to the field, have a forward configured that calls a forwardHandler as per:
+    # https://django-autocomplete-light.readthedocs.io/en/master/tutorial.html#customizing-forwarding-logic
+    #
+    # A ForwardHandler must be registered in the client side Javascript with the name excludeModel or the DAL
+    # widget will fail because of an unregistered handler.
+    unique_model_choice = []
+
+    # Fields in unique_model_choice are identfied by the model qualified field name, in form <model>.field_name>.
+    # The qualified names that are DAL widgets are saved in this form property for reference to see what qualified
+    # field names have DAL widgets. This is  a dict keyed on the qualified
+    # field name with the widget as a value
+    dal_widgets = {}
 
     def get_object(self, *args, **kwargs):
         '''Fetches the object to edit and augments the standard queryset by passing the model to the view so it can make model based decisions and access model attributes.'''
