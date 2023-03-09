@@ -42,6 +42,7 @@ from django.template.response import TemplateResponse
 from django.forms.models import fields_for_model, ModelChoiceField, ModelMultipleChoiceField
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
+#from django.contrib.gis.geos import Point
 
 # 3rd Party package imports (dependencies)
 #from url_filter.filtersets import ModelFilterSet
@@ -50,6 +51,7 @@ from dal import autocomplete, forward
 from markdownfield.forms import MarkdownFormField
 from markdownfield.widgets import MDEWidget
 from mapbox_location_field.forms import LocationField
+from mapbox_location_field.widgets import MapInput
 
 # Package imports
 from .logs import logger as log
@@ -492,11 +494,63 @@ def get_form_generic(self, return_mqfns=False):
         form.order_fields(model.field_order)
 
     # Attach the MDE widget to all any markdown fields and note any LocationFields
+    # MDEWidget add CSS and js to form.media
+    # LocationField does not. Its media and template tags should be included if
+    # needed with code like this in the template:
+    #     {% if has_location %}
+    #         {% load mapbox_location_field_tags %}
+    #         {% location_field_includes %}
+    #     {% endif %}
     self.has_location = False
+    self.has_markdown = False
     for field_name, field in form.fields.items():
         if isinstance(field, MarkdownFormField):
             field.widget = MDEWidget()
+            self.has_markdown = True
         if isinstance(field, LocationField):
+
+            # geo_box can define a bounding box.
+            # Alas I see no way of initialising the LocationField with a bounding box.
+            # There may be a way to estimate a zoom factor given a bounding box. But
+            # from the doc:
+            #    https://docs.mapbox.com/help/glossary/zoom-level/
+            # it seems we'd need to
+            if 'geo_box' in self.request.session:
+                box = self.request.session['geo_box']
+                lats = box[:2]
+                lons = box[2:]
+                sw_lat = float(max(lats))
+                sw_lon = float(min(lons))
+                ne_lat = float(min(lats))
+                ne_lon = float(max(lons))
+
+                mid_lat = (sw_lat + ne_lat) / 2
+                mid_lon = (sw_lon + ne_lon) / 2
+
+            # geo_point takes precedence over the geo_box.
+            if 'geo_point' in self.request.session:
+                p = self.request.session['geo_point']
+                mid_lat, mid_lon = p.latitude, p.longitude
+
+            #field.initial = Point(mid_lon, mid_lat)
+            #field.initial = f"({mid_lon}, {mid_lat})"
+
+            # On an UpdateForm we have initial form data
+            # The fdefault value for legacy locations is (0,0)
+            # but the MapInput widget takes that as a literals 0,0 lan, lon
+            # so we remove that initial value.
+            if form.initial:
+                initial = form.initial[field_name]
+                if initial == (0, 0):
+                     del form.initial[field_name]
+
+            field.widget.map_attrs = {
+                "center": [mid_lon, mid_lat],
+                "zoom": 12,  # https://docs.mapbox.com/help/glossary/zoom-level/
+                # chatGPT thought "bounds" would work but I see no doc for that nor does it seem to work.
+                #"bounds": [[sw_lon, sw_lat], [ne_lon, ne_lat]]
+                }
+
             self.has_location = True
 
     # Attach DAL (Django Autocomplete Light) Select2
@@ -550,6 +604,7 @@ def get_form_generic(self, return_mqfns=False):
                 # Attach the MDE widget to all any markdown fields and note any LocationFields
                 if isinstance(field, MarkdownFormField):
                     field.widget = MDEWidget()
+                    self.has_markdown = True
                 if isinstance(field, LocationField):
                     self.has_location = True
 
