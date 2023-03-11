@@ -268,7 +268,7 @@ class object_display_modes():
 
     # Define a threshold for short/long classification
     #
-    # To be considered short (and win rights to on-line rendering):
+    # To be considered short (and win rights to one-line rendering):
     # A scalar value must contain no line breaks and not be longer than this
     # A list value when rendered as CSV must satisfy same constraint
     char_limit = 80  # Scalars lower than this with no line breaks are considered short

@@ -532,13 +532,20 @@ def get_form_generic(self, return_mqfns=False):
                 p = self.request.session['geo_point']
                 mid_lat, mid_lon = p.latitude, p.longitude
 
-            #field.initial = Point(mid_lon, mid_lat)
-            #field.initial = f"({mid_lon}, {mid_lat})"
-
-            # On an UpdateForm we have initial form data
-            # The fdefault value for legacy locations is (0,0)
-            # but the MapInput widget takes that as a literals 0,0 lan, lon
-            # so we remove that initial value.
+            # field.initial sets the value of the text box
+            # field.widget.map_attrs["center"] sets the center of the displayed map
+            # field.widget.map_attrs["zoom"] sets the zoom level of the displayed map
+            #
+            # field.initial is set for us already if using an Update form.
+            # field.initial  is (0,0) on any Update forms where locaction is null.
+            # The (0,0) is rendered and interpreted so we need to remove it from form.initial
+            #
+            # if for any reason we want to set field.intiial it take two formats readily:
+            #
+            #    field.initial = Point(lon, lat)
+            #    field.initial = f"({lon}, {lat})"
+            #
+            # Note: these are lon, lat not lat, lon
             if form.initial:
                 initial = form.initial[field_name]
                 if initial == (0, 0):

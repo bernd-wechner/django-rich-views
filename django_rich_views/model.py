@@ -382,9 +382,10 @@ def collect_rich_object_fields(view):
     which has an object already (view.obj) (so after or in get_object), will define view.fields with
     a dictionary of fields that a renderer can walk through later.
 
-    Additionally view.fields_bucketed is a copy of view.fields in the buckets specified in object_display_format
-    and view.fields_flat and view.fields_list also contain all the view.fields split into the scalar (flat) values
-    and the list values respectively (which are ToMany relations to other models).
+    Additionally view.fields_bucketed (is a copy of view.fields in the buckets specified in
+    object_display_format by object_display_flags) and view.fields_flat and view.fields_list
+    also contain all the view.fields split into the scalar (flat) values and the list values
+    respectively (which are ToMany relations to other models).
 
     Expects ManyToMany relationships to be set up bi-directionally, in both involved models,
     i.e. makes no special effort to find the reverse relationships and if they are not set up
@@ -415,6 +416,12 @@ def collect_rich_object_fields(view):
 
     def is_bitfield(field):
         return type(field).__name__ == "BitField"
+
+    def is_locationfield(field):
+        return type(field).__name__ == "LocationField"
+
+    def is_renderedmarkdown(field):
+        return type(field).__name__ == "RenderedMarkdownField"
 
     ODF = view.format.flags
 
@@ -569,15 +576,61 @@ def collect_rich_object_fields(view):
                   else None)
 
         if not bucket is None:
-            if is_list(field):
+            #######################################################################
+            # We preapre each field by giving it the following attribues expected
+            # downstream in this package:
+            #
+            #     field.label
+            #     field.label
+            #     field.is_list
+            #
+            # And placing it into one of the appropriate buckets of
+            #
+            #    view.fields_flat, or
+            #    view.fields_list
+            #
+            # We handle the rendering of field.value here based on the field
+            # type and field.value can be a scalar (flat) or a list.
+            field.label = safetitle(field.verbose_name)
+
+            if is_bitfield(field):
+                if ODF & odf.flat:
+                    field.is_list = False
+                    flags = []
+                    for f in field.flags:
+                        bit = getattr(getattr(view.obj, field.name), f)
+                        if bit.is_set:
+                            flags.append(
+                                getattr(view.obj, field.name).get_label(f))
+
+                    if len(flags) > 0:
+                        field.value = odm_str(", ".join(flags), view.format.mode)
+                    else:
+                        field.value = NONE
+
+                    view.fields_flat[bucket][field.name] = field
+            elif is_locationfield(field):
+                field.is_list = False
+                value = getattr(view.obj, field.name)
+                prefix = f"Within {value[2]}m of " if len(value) > 2 else ""
+                field.value = f"{prefix}Latitude: {value[1]}, Longitude: {value[0]}"
+                view.fields_flat[bucket][field.name] = field
+            elif is_renderedmarkdown(field):
+                # This is a block not flat or a list ...
+                # TODO: consider best rendering
+                field.is_list = False
+                field.value = mark_safe(getattr(view.obj, field.name))
+                view.fields_flat[bucket][field.name] = field
+            elif is_list(field):
                 if ODF & odf.list:
+                    field.is_list = True
+
                     # If it's a model field it has an attname attribute, else
                     # it's a _set atttribute
                     attname = field.name if hasattr(
                         field, 'attname') else field.name + '_set' if field.related_name is None else field.related_name
 
-                    field.is_list = True
-                    field.label = safetitle(attname.replace('_', ' '))
+                    #field.label = safetitle(attname.replace('_', ' '))
 
                     ros = apply_sort_by(getattr(view.obj, attname).all())
 
@@ -588,29 +641,9 @@ def collect_rich_object_fields(view):
                         field.value = NONE
 
                     view.fields_list[bucket][field.name] = field
-            elif is_bitfield(field):
-                if ODF & odf.flat:
-                    flags = []
-                    for f in field.flags:
-                        bit = getattr(getattr(view.obj, field.name), f)
-                        if bit.is_set:
-                            flags.append(
-                                getattr(view.obj, field.name).get_label(f))
-                    field.is_list = False
-                    field.label = safetitle(field.verbose_name)
-
-                    if len(flags) > 0:
-                        field.value = odm_str(
-                            ", ".join(flags), view.format.mode)
-                    else:
-                        field.value = NONE
-
-                    view.fields_flat[bucket][field.name] = field
             else:
                 if ODF & odf.flat:
                     field.is_list = False
-                    field.label = safetitle(field.verbose_name)
-
                     field.value = odm_str(
                         getattr(view.obj, field.name), view.format.mode)
                     if not str(field.value):
@@ -751,7 +784,7 @@ class NotesMixIn(models.Model):
 
     and centralises that here for DRY reasons.
     '''
-    notes = MarkdownField(rendered_field='notes_rendered', validator=VALIDATOR_STANDARD, null=True)
+    notes = MarkdownField(rendered_field='notes_rendered', validator=VALIDATOR_STANDARD, blank=True, null=True)
     notes_rendered = RenderedMarkdownField(null=True)
 
     __notes_mixin_marker__ = True
