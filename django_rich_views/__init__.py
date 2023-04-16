@@ -216,5 +216,6 @@ import html
 
 # Some handy constants
 NONE = html.escape("<None>")
+OOPS = html.escape("<Oops>")
 NOT_SPECIFIED = html.escape("<Not specified>")
 FIELD_LINK_CLASS = "field_link"

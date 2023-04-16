@@ -388,6 +388,9 @@ class RichDetailView(DetailView):
 
     # Fetch the URL specified object, needs the URL parameters "model" and "pk"
     def get_object(self, *args, **kwargs):
+        if settings.DEBUG:
+            log.debug("Getting object.")
+
         self.model = class_from_string(self, self.kwargs['model'])
         self.pk = self.kwargs['pk']
 
@@ -397,8 +400,7 @@ class RichDetailView(DetailView):
         # Get Neighbour info for the object browser
         self.filterset = get_filterset(self.request, self.model)
 
-        neighbours = get_neighbour_pks(
-            self.model, self.pk, filterset=self.filterset, ordering=self.ordering)
+        neighbours = get_neighbour_pks(self.model, self.pk, filterset=self.filterset, ordering=self.ordering)
 
         # Support for incoming next/prior requests via a GET
         if 'next' in self.request.GET or 'prior' in self.request.GET:

@@ -57,10 +57,22 @@ def special_titles(text, all_caps=False):
         return None
 
 
-def safetitle(text):
+def safetitle(obj):
     '''Given an object returns a title case version of its string representation.'''
-    return titlecase(text if isinstance(text, str) else str(text), callback=special_titles)
+    if isinstance(obj, str):
+        title = obj
+    # If obj is a DJango filed, it may have a verbose-name which is probably a plain language name
+    elif hasattr(obj, 'verbose_name'):
+        title = obj.verbose_name
+    # Otherwise if obj is a field without a verbose_name it will have a name in all likelihood but
+    # that will be a variable name so we translate _ to space before making it title case.
+    elif hasattr(obj, 'name'):
+        title = obj.name.replace('_', ' ')
+    # As a fallback just try and make it a string
+    else:
+        title = str(obj)
 
+    return titlecase(title, callback=special_titles)
 
 def app_from_object(o):
     '''Given an object returns the name of the Django app that it's declared in'''

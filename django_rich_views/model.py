@@ -423,6 +423,9 @@ def collect_rich_object_fields(view):
     def is_renderedmarkdown(field):
         return type(field).__name__ == "RenderedMarkdownField"
 
+    if settings.DEBUG:
+        log.debug(f"Collecting Rich Object: {view.obj}")
+
     ODF = view.format.flags
 
     all_fields = view.obj._meta.get_fields()  # All fields
@@ -591,7 +594,7 @@ def collect_rich_object_fields(view):
             #
             # We handle the rendering of field.value here based on the field
             # type and field.value can be a scalar (flat) or a list.
-            field.label = safetitle(field.verbose_name)
+            field.label = safetitle(field)
 
             if is_bitfield(field):
                 if ODF & odf.flat:
@@ -627,8 +630,7 @@ def collect_rich_object_fields(view):
 
                     # If it's a model field it has an attname attribute, else
                     # it's a _set atttribute
-                    attname = field.name if hasattr(
-                        field, 'attname') else field.name + '_set' if field.related_name is None else field.related_name
+                    attname = field.name if hasattr(field, 'attname') else field.name + '_set' if field.related_name is None else field.related_name
 
                     #field.label = safetitle(attname.replace('_', ' '))
 
@@ -644,8 +646,11 @@ def collect_rich_object_fields(view):
             else:
                 if ODF & odf.flat:
                     field.is_list = False
-                    field.value = odm_str(
-                        getattr(view.obj, field.name), view.format.mode)
+                    try:
+                        field.value = odm_str(getattr(view.obj, field.name), view.format.mode)
+                    except ObjectDoesNotExist:
+                        field.value = None
+
                     if not str(field.value):
                         field.value = NOT_SPECIFIED
 
@@ -694,8 +699,7 @@ def collect_rich_object_fields(view):
                         p.value = NONE
                     elif isDictionary(value):
                         # Value becomes Key: Value
-                        p.value = [
-                            f"{odm_str(k, view.format.mode)}: {odm_str(v, view.format.mode)}" for k, v in dict.items(value)]
+                        p.value = [f"{odm_str(k, view.format.mode)}: {odm_str(v, view.format.mode)}" for k, v in dict.items(value)]
                     else:
                         p.value = [odm_str(val, view.format.mode)
                                    for val in list(value)]
@@ -742,6 +746,9 @@ def collect_rich_object_fields(view):
             for name, value in field_list.items():
                 view.fields_bucketed[bucket][name] = value
                 view.fields[name] = value
+
+    if settings.DEBUG:
+        log.debug(f"DONE Collecting Rich Object: {view.obj}")
 
 
 class RichMixIn():

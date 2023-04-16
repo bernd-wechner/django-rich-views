@@ -22,7 +22,8 @@ from django.utils.encoding import force_str
 from django.utils.safestring import mark_safe
 
 # Package imports
-from . import FIELD_LINK_CLASS, NONE
+from . import FIELD_LINK_CLASS, NONE, OOPS
+from .logs import logger as log
 from .util import isListValue, isDictionary, isPRE, emulatePRE, indentVAL, getApproximateArialStringWidth
 from .datetime import time_str
 from .options import list_display_format, object_display_format, object_display_modes, flt, osf, odm, odf, lmf
@@ -348,190 +349,192 @@ def object_html_output(self, ODM=None):
     :param ODM: An Object Display Mode (from object_display_modes)
     '''
     # TODO: This should really support CSS classes like BaseForm._html_output, so that a class can be specified
+    try:
+        ODF = self.format
+        if not ODM is None:
+            ODF.mode.object = ODM
 
-    ODF = self.format
-    if not ODM is None:
-        ODF.mode.object = ODM
+        # Define the standard HTML strings for supported formats
+        if ODF.mode.object == odm.as_table:
+            header_row = "<tr><th valign='top'>{header:s} {line1:s}</th><td>{line2:s}</td></tr>"
+            normal_row = "<tr><th valign='top'>{label:s}</th><td>{value:s}{help_text:s}</td></tr>"
+            help_text_html = '<br /><span class="helptext">%s</span>'
+        elif ODF.mode.object == odm.as_ul:
+            header_row = "<li><b>{header:s}</b> {line1:s}</li>"
+            normal_row = "<li><b>{label:s}:</b> {value:s}{help_text:s}</li>"
+            help_text_html = ' <span class="helptext">%s</span>'
+        elif ODF.mode.object == odm.as_p:
+            header_row = "<p><b>{header:s}</b> {line1:s}</p>"
+            normal_row = "<p><b>{label:s}:</b> {value:s}{help_text:s}</p>"
+            help_text_html = ' <span class="helptext">%s</span>'
+        elif ODF.mode.object == odm.as_br:
+            header_row = "<b>{header:s}</b> {line1:s}<br>"
+            normal_row = '<b>{label:s}:</b> {value:s}{help_text:s}<br>'
+            help_text_html = ' <span class="helptext">%s</span>'
+        else:
+            raise ValueError("Internal Error: format must always contain one of the object layout modes.")
 
-    # Define the standard HTML strings for supported formats
-    if ODF.mode.object == odm.as_table:
-        header_row = "<tr><th valign='top'>{header:s} {line1:s}</th><td>{line2:s}</td></tr>"
-        normal_row = "<tr><th valign='top'>{label:s}</th><td>{value:s}{help_text:s}</td></tr>"
-        help_text_html = '<br /><span class="helptext">%s</span>'
-    elif ODF.mode.object == odm.as_ul:
-        header_row = "<li><b>{header:s}</b> {line1:s}</li>"
-        normal_row = "<li><b>{label:s}:</b> {value:s}{help_text:s}</li>"
-        help_text_html = ' <span class="helptext">%s</span>'
-    elif ODF.mode.object == odm.as_p:
-        header_row = "<p><b>{header:s}</b> {line1:s}</p>"
-        normal_row = "<p><b>{label:s}:</b> {value:s}{help_text:s}</p>"
-        help_text_html = ' <span class="helptext">%s</span>'
-    elif ODF.mode.object == odm.as_br:
-        header_row = "<b>{header:s}</b> {line1:s}<br>"
-        normal_row = '<b>{label:s}:</b> {value:s}{help_text:s}<br>'
-        help_text_html = ' <span class="helptext">%s</span>'
-    else:
-        raise ValueError("Internal Error: format must always contain one of the object layout modes.")
+        # Collect output lines in a list
+        output = []
 
-    # Collect output lines in a list
-    output = []
+        for bucket in self.fields_bucketed:
+            # Define a label for this bucket
+            bucket_label = ('Internal fields' if bucket == odf.internal
+                else 'Related fields' if bucket == odf.related
+                else 'Properties' if bucket == odf.properties
+                else 'Methods' if bucket == odf.methods
+                else 'Summaries' if bucket == odf.summaries
+                else 'Standard fields' if bucket == odf.model and ODF.flags & odf.header
+                else None if bucket == odf.model
+                else 'Unknown ... [internal error]')
 
-    for bucket in self.fields_bucketed:
-        # Define a label for this bucket
-        bucket_label = ('Internal fields' if bucket == odf.internal
-            else 'Related fields' if bucket == odf.related
-            else 'Properties' if bucket == odf.properties
-            else 'Methods' if bucket == odf.methods
-            else 'Summaries' if bucket == odf.summaries
-            else 'Standard fields' if bucket == odf.model and ODF.flags & odf.header
-            else None if bucket == odf.model
-            else 'Unknown ... [internal error]')
+            # Output a separator for this bucket if needed
+            # Will depend on the object display mode
+            if bucket_label and (ODF.flags & odf.separated) and self.fields_bucketed[bucket]:
+                label = bucket_label if ODF.flags & odf.header else ""
 
-        # Output a separator for this bucket if needed
-        # Will depend on the object display mode
-        if bucket_label and (ODF.flags & odf.separated) and self.fields_bucketed[bucket]:
-            label = bucket_label if ODF.flags & odf.header else ""
+                if ODF.flags & odf.line:
+                    if ODF.mode.object == odm.as_table:
+                        line = "<hr style='display:inline-block; width:60%;' />"
+                    else:
+                        label_width = int(round(getApproximateArialStringWidth(bucket_label) / getApproximateArialStringWidth('M')))
+                        line = "&mdash;"*(ODF.mode.line_width - label_width - 1)
 
-            if ODF.flags & odf.line:
                 if ODF.mode.object == odm.as_table:
-                    line = "<hr style='display:inline-block; width:60%;' />"
+                    label_format = '<span style="float:left;">{}</span>'
                 else:
-                    label_width = int(round(getApproximateArialStringWidth(bucket_label) / getApproximateArialStringWidth('M')))
-                    line = "&mdash;"*(ODF.mode.line_width - label_width - 1)
+                    label_format = '{}'
 
-            if ODF.mode.object == odm.as_table:
-                label_format = '<span style="float:left;">{}</span>'
-            else:
-                label_format = '{}'
+                row = header_row.format(header=label_format.format(label), line1=line, line2=line)
 
-            row = header_row.format(header=label_format.format(label), line1=line, line2=line)
-
-            if ODF.mode.object == odm.as_ul:
-                row_format = '{}<ul>'
-            elif ODF.mode.object == odm.as_br:
-                row_format = '{}</p><p style="padding-left:' + str(ODF.mode.indent) + 'ch">'
-            else:
-                row_format = '{}'
-
-            output.append(row_format.format(row))
-
-        # Output a the fields in this bucket
-        for name in self.fields_bucketed[bucket]:
-            field = self.fields_bucketed[bucket][name]
-            value = field.value
-
-            if hasattr(field, 'label') and field.label:
-                label = conditional_escape(force_str(field.label))
-            else:
-                label = ''
-
-            # self.format specifies how we'll render the field, i.e. build our row.
-            #
-            # normal_row has been specified above in accord with the as_ format specified.
-            #
-            # The object display mode defines where the value lands.
-            # The long list display mode defines how a list value is rendered in that spot
-            # short lists are rendered as CSV values in situ
-            br_fix = False
-
-            if field.is_list:
-                proposed_value = value if value == NONE else ", ".join(value)
-
-                is_short = (len(proposed_value) <= ODF.mode.char_limit) and not ("\n" in proposed_value)
-
-                if is_short:
-                    value = proposed_value
+                if ODF.mode.object == odm.as_ul:
+                    row_format = '{}<ul>'
+                elif ODF.mode.object == odm.as_br:
+                    row_format = '{}</p><p style="padding-left:' + str(ODF.mode.indent) + 'ch">'
                 else:
-                    # as_br is special as many fields are in one P with BRs between them. This P cannot contain
-                    # block elements so there is only one sensible rendering (which is to conserve the intended
-                    # paragraph and just put long list values one one BR terminated line each, indenting with
-                    # a SPAN that is permitted in a P.
-                    if ODF.mode.object == odm.as_br:
-                        value = indentVAL("<br>".join(value), ODF.mode.indent)
-                        br_fix = ODF.mode.object == odm.as_br
-                    else:
-                        if ODF.mode.list_values == odm.as_table:
-                            strindent = ''
-                            if ODF.mode.object == odm.as_p and ODF.mode.indent > 0:
-                                strindent = " style='padding-left: {}ch'".format(ODF.mode.indent)
-                            value = "<table{}><tr><td>".format(strindent) + "</td></tr><tr><td>".join(value) + "</td></tr></table>"
-                        elif ODF.mode.list_values == odm.as_ul:
-                            strindent = ''
-                            if ODF.mode.object == odm.as_p and ODF.mode.indent > 0:
-                                strindent = " style='padding-left: {}ch'".format(ODF.mode.indent)
-                            value = "<ul{}><li>".format(strindent) + "</li><li>".join(value) + "</li></ul>"
-                        elif ODF.mode.list_values == odm.as_p:
-                            strindent = ''
-                            if ODF.mode.object == odm.as_p and ODF.mode.indent > 0:
-                                strindent = " style='padding-left: {}ch'".format(ODF.mode.indent)
-                            value = "<p{}>".format(strindent) + "</p><p{}>".format(strindent).join(value) + "</p>"
-                        elif ODF.mode.list_values == odm.as_br:
-                            strindent = ''
-                            if ODF.mode.object == odm.as_p and ODF.mode.indent > 0:
-                                strindent = " style='padding-left: {}ch'".format(ODF.mode.indent)
-                            value = "<p{}>".format(strindent) + "<br>".join(value) + "</p>"
-                        else:
-                            raise ValueError("Internal Error: self.format must always contain one of the list layouts.")
-            else:
-                proposed_value = value
-                is_short = (len(proposed_value) <= ODF.mode.char_limit) and not ("\n" in proposed_value)
+                    row_format = '{}'
 
-                if is_short:
-                    value = proposed_value
+                output.append(row_format.format(row))
+
+            # Output a the fields in this bucket
+            for name in self.fields_bucketed[bucket]:
+                field = self.fields_bucketed[bucket][name]
+                value = field.value
+
+                if hasattr(field, 'label') and field.label:
+                    label = conditional_escape(force_str(field.label))
                 else:
-                    indent = ODF.mode.indent if ODF.mode.object != odm.as_table else 0
-                    if isPRE(value):
-                        value = emulatePRE(value, indent)
-                        br_fix = ODF.mode.object == odm.as_br
-                    else:
-                        value = indentVAL(value, indent)
+                    label = ''
 
-            if hasattr(field, 'help_text') and field.help_text:
-                help_text = help_text_html % force_str(field.help_text)
-            else:
-                help_text = ''
+                # self.format specifies how we'll render the field, i.e. build our row.
+                #
+                # normal_row has been specified above in accord with the as_ format specified.
+                #
+                # The object display mode defines where the value lands.
+                # The long list display mode defines how a list value is rendered in that spot
+                # short lists are rendered as CSV values in situ
+                br_fix = False
 
-            # Indent the label only for tables with headed separators.
-            # The other object display modes render best without an indent on the label.
-            if ODF.mode.object == odm.as_table and ODF.flags & odf.separated and ODF.flags & odf.header:
-                label_format = indentVAL("{}", ODF.mode.indent)
-            else:
-                label_format = '{}'
-
-            html_label = label_format.format(force_str(label))
-            html_value = six.text_type(value)
-            html_help = help_text
-
-            if settings.DEBUG:
                 if field.is_list:
-                    html_label = "<span style='color:red;'>" + html_label + "</span>"
-                if is_short:
-                    html_value = "<span style='color:red;'>" + html_value + "</span>"
+                    proposed_value = NONE if value == NONE else ", ".join(value)
 
-            row = normal_row.format(label=html_label, value=html_value, help_text=html_help)
+                    is_short = (len(proposed_value) <= ODF.mode.char_limit) and not ("\n" in proposed_value)
 
-            # FIXME: This works. But we should consider a cleaner way to put the br inside
-            # the span that goes round the whole list in as_br mode. The fix needs a consideration
-            # of normal_row and indentVAL() the later wrapping in a SPAN the former terminating with
-            # BR at present. And in that order an unwanted blank line appears. If we swap them and
-            # bring the BR inside of the SPAN the render is cleaner.
-            if br_fix:
-                row = re.sub(r"</span><br>$", r"<br></span>", row, 0, ref.IGNORECASE)
+                    if is_short:
+                        value = proposed_value
+                    else:
+                        # as_br is special as many fields are in one P with BRs between them. This P cannot contain
+                        # block elements so there is only one sensible rendering (which is to conserve the intended
+                        # paragraph and just put long list values one one BR terminated line each, indenting with
+                        # a SPAN that is permitted in a P.
+                        if ODF.mode.object == odm.as_br:
+                            value = indentVAL("<br>".join(value), ODF.mode.indent)
+                            br_fix = ODF.mode.object == odm.as_br
+                        else:
+                            if ODF.mode.list_values == odm.as_table:
+                                strindent = ''
+                                if ODF.mode.object == odm.as_p and ODF.mode.indent > 0:
+                                    strindent = " style='padding-left: {}ch'".format(ODF.mode.indent)
+                                value = "<table{}><tr><td>".format(strindent) + "</td></tr><tr><td>".join(value) + "</td></tr></table>"
+                            elif ODF.mode.list_values == odm.as_ul:
+                                strindent = ''
+                                if ODF.mode.object == odm.as_p and ODF.mode.indent > 0:
+                                    strindent = " style='padding-left: {}ch'".format(ODF.mode.indent)
+                                value = "<ul{}><li>".format(strindent) + "</li><li>".join(value) + "</li></ul>"
+                            elif ODF.mode.list_values == odm.as_p:
+                                strindent = ''
+                                if ODF.mode.object == odm.as_p and ODF.mode.indent > 0:
+                                    strindent = " style='padding-left: {}ch'".format(ODF.mode.indent)
+                                value = "<p{}>".format(strindent) + "</p><p{}>".format(strindent).join(value) + "</p>"
+                            elif ODF.mode.list_values == odm.as_br:
+                                strindent = ''
+                                if ODF.mode.object == odm.as_p and ODF.mode.indent > 0:
+                                    strindent = " style='padding-left: {}ch'".format(ODF.mode.indent)
+                                value = "<p{}>".format(strindent) + "<br>".join(value) + "</p>"
+                            else:
+                                raise ValueError("Internal Error: self.format must always contain one of the list layouts.")
+                else:
+                    proposed_value = NONE if value is None else value
+                    is_short = (len(proposed_value) <= ODF.mode.char_limit) and not ("\n" in proposed_value)
 
-            # Finally, indent the whole "field: value" row if needed
-            if ODF.mode.object == odm.as_p and ODF.flags & odf.separated and ODF.flags & odf.header:
-                row_format = indentVAL("{}", ODF.mode.indent)
-            else:
-                row_format = '{}'
+                    if is_short:
+                        value = proposed_value
+                    else:
+                        indent = ODF.mode.indent if ODF.mode.object != odm.as_table else 0
+                        if isPRE(value):
+                            value = emulatePRE(value, indent)
+                            br_fix = ODF.mode.object == odm.as_br
+                        else:
+                            value = indentVAL(value, indent)
 
-            output.append(row_format.format(row))
+                if hasattr(field, 'help_text') and field.help_text:
+                    help_text = help_text_html % force_str(field.help_text)
+                else:
+                    help_text = ''
 
-        # End the UL sublist (the one with label: value pairs on it, being sub to the header/separator list) if needed
-        if bucket_label and (ODF.flags & odf.separated) and self.fields_bucketed[bucket]:
-            if ODF.mode.object == odm.as_ul:
-                output.append('</ul>')
-            elif ODF.mode.object == odm.as_br:
-                output.append('</p><p>')
+                # Indent the label only for tables with headed separators.
+                # The other object display modes render best without an indent on the label.
+                if ODF.mode.object == odm.as_table and ODF.flags & odf.separated and ODF.flags & odf.header:
+                    label_format = indentVAL("{}", ODF.mode.indent)
+                else:
+                    label_format = '{}'
+
+                html_label = label_format.format(force_str(label))
+                html_value = six.text_type(value)
+                html_help = help_text
+
+                if settings.DEBUG:
+                    if field.is_list:
+                        html_label = "<span style='color:red;'>" + html_label + "</span>"
+                    if is_short:
+                        html_value = "<span style='color:red;'>" + html_value + "</span>"
+
+                row = normal_row.format(label=html_label, value=html_value, help_text=html_help)
+
+                # FIXME: This works. But we should consider a cleaner way to put the br inside
+                # the span that goes round the whole list in as_br mode. The fix needs a consideration
+                # of normal_row and indentVAL() the later wrapping in a SPAN the former terminating with
+                # BR at present. And in that order an unwanted blank line appears. If we swap them and
+                # bring the BR inside of the SPAN the render is cleaner.
+                if br_fix:
+                    row = re.sub(r"</span><br>$", r"<br></span>", row, 0, ref.IGNORECASE)
+
+                # Finally, indent the whole "field: value" row if needed
+                if ODF.mode.object == odm.as_p and ODF.flags & odf.separated and ODF.flags & odf.header:
+                    row_format = indentVAL("{}", ODF.mode.indent)
+                else:
+                    row_format = '{}'
+
+                output.append(row_format.format(row))
+
+            # End the UL sublist (the one with label: value pairs on it, being sub to the header/separator list) if needed
+            if bucket_label and (ODF.flags & odf.separated) and self.fields_bucketed[bucket]:
+                if ODF.mode.object == odm.as_ul:
+                    output.append('</ul>')
+                elif ODF.mode.object == odm.as_br:
+                    output.append('</p><p>')
+    except Exception as e:
+        output = OOPS
 
     return mark_safe('\n'.join(output))
 
