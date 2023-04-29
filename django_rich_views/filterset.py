@@ -20,10 +20,14 @@ from django.utils.formats import localize
 from django.utils.safestring import mark_safe
 from django.http.request import QueryDict
 from django.db.models.query_utils import DeferredAttribute
+from django.db.models import DateTimeField, DateField
+from django.conf import settings
 
 # Other imports
 from url_filter.filtersets import ModelFilterSet
 from url_filter.constants import StrictMode
+
+from .logs import logger as log
 
 operation_text = {
     "exact": " = ",
@@ -181,14 +185,22 @@ def get_filterset(request, model):
         if F:
             qd.update(F)
 
-    # TODO: test this with GET params and session filter!
-    fs = FilterSet(data=qd, queryset=qs, strict_mode=StrictMode.fail)
+    try:
+        fs = FilterSet(data=qd, queryset=qs, strict_mode=StrictMode.fail)
+    except Exception as E:
+        # TODO: Raise an error that returns an error page to inform the user fo the problem
+        if settings.DEBUG:
+            log.debug(f"Filterset creation failed with {E}")
+        return None
 
     # get_specs raises an Empty exception if there are no specs, and a
     # ValidationError if a value is illegal
     try:
         specs = fs.get_specs()
     except Exception as E:
+        # TODO: Raise an error that returns an error page to inform the user fo the problem
+        if settings.DEBUG:
+            log.debug(f"Filterset Spec extraction failed with {E}")
         specs = []
 
     if len(specs) > 0:

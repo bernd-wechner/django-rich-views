@@ -348,6 +348,9 @@ class RichListView(ListView):
 
         self.count = len(self.queryset)
 
+        if settings.DEBUG:
+            log.debug(f"count = {self.count}")
+
         return self.queryset
 
     # Add some model identifiers to the context (if 'model' is passed in via
