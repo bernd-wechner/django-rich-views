@@ -9,9 +9,12 @@ import re, sqlparse
 from datetime import datetime, timedelta
 
 from django.db import connection
+from django.db.models import Field
+from django.db.models.lookups import In
+from django.db.models.fields.related_lookups import MultiColSource, get_normalized_value
 
 
-def get_SQL(queryset, explain=False):
+def get_SQL(queryset, explain=False, pretty=True):
     '''
     A workaround for a bug in Django which is reported here (several times):
         https://code.djangoproject.com/ticket/30132
@@ -65,7 +68,10 @@ def get_SQL(queryset, explain=False):
         # Which is precisely how Python2 standard % formating works.
         SQL = sql % params
 
-        return SQL
+        if pretty:
+            return sqlparse.format(SQL, reindent=True, keyword_case='upper')
+        else:
+            return SQL
 
 
 def print_SQL(queryset, explain=False):
@@ -77,7 +83,7 @@ def print_SQL(queryset, explain=False):
     :param queryset: A Django QuerySet
     :param explain:  If True uses the server's EXPLAIN function. Not good for invalid SQL alas.
     '''
-    print(sqlparse.format(get_SQL(queryset, explain), reindent=True, keyword_case='upper'))
+    print(get_SQL(queryset, explain))
 
 
 def wrap_filter(queryset, sql_where_crtiteria):
@@ -92,7 +98,7 @@ def wrap_filter(queryset, sql_where_crtiteria):
             and the filtering should be done in an outer query."
 
     Here  is our workaround until that is fixed in Django, namely we wrap a select/where
-    around the exisitng queryset explicitly.
+    around the existing queryset explicitly.
 
     Alas in so doing we turn it into a raw queryset.
 

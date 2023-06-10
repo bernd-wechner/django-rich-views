@@ -791,7 +791,7 @@ class NotesMixIn(models.Model):
 
     and centralises that here for DRY reasons.
     '''
-    notes = MarkdownField(rendered_field='notes_rendered', validator=VALIDATOR_STANDARD, blank=True, null=True)
+    notes = MarkdownField(rendered_field='notes_rendered', validator=VALIDATOR_STANDARD, blank=True, null=True, default="")
     notes_rendered = RenderedMarkdownField(null=True)
 
     __notes_mixin_marker__ = True

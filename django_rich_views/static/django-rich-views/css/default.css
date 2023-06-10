@@ -26,7 +26,7 @@
 	padding: 6px 6px 6px 6px;
  }
 
- .form_control:not(.BitFormField) {
+ .form_control:not(.BitFormField)::not(input[type="checkbox"]) {
 	height: 28px;
 	display: inline-block;
  }

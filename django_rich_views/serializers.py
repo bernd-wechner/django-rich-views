@@ -1,11 +1,11 @@
 import datetime, json, decimal, uuid
 
+from django.core.serializers.json import DjangoJSONEncoder
+
 from django.utils.timezone import is_aware
 from django.utils.duration import duration_iso_string
 from django.utils.dateparse import parse_duration
 from django.utils.functional import Promise
-from builtins import isinstance
-
 
 class TypedEncoder(json.JSONEncoder):
     '''
