@@ -293,8 +293,7 @@ def add_debug_context(view_request, context):
     context['Django_version'] = django.__version__
 
     context['DAL_source'] = dal.__spec__.origin  # @UndefinedVariable
-    context['DAL_version'] = get_distribution(
-        "django-autocomplete-light").version
+    context['DAL_version'] = get_distribution("django-autocomplete-light").version
 
     context['DEBUG_JQuery'] = settings.DEBUG
     context['DEBUG_BokehJS'] = settings.DEBUG
