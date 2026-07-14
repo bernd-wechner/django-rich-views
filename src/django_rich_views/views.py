@@ -41,7 +41,7 @@ from django.template.response import TemplateResponse
 #from django.http.request import QueryDict
 from django.forms.models import fields_for_model, ModelChoiceField, ModelMultipleChoiceField
 from django.conf import settings
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError, NON_FIELD_ERRORS
 #from django.contrib.gis.geos import Point
 
 # 3rd Party package imports (dependencies)
@@ -91,7 +91,7 @@ def get_ordering(self):
 
 def dispatch_generic(self, request, *args, **kwargs):
     '''
-    Adds attributes to the view describing the app and model a
+    Adds attributes to the view describing the app and model 
     and provides a pre_dispatch hook for setting view properties
     in derived classes.
 
@@ -343,8 +343,7 @@ class RichListView(ListView):
 
         if settings.DEBUG:
             log.debug(f"ordering  = {self.ordering}")
-            log.debug(
-                f"filterset = {self.filterset.get_specs() if self.filterset else None}")
+            log.debug(f"filterset = {self.filterset.get_specs() if self.filterset else None}")
 
         self.count = len(self.queryset)
 
@@ -452,8 +451,8 @@ class RichDetailView(DetailView):
 def get_form_generic(self, return_mqfns=False):
     '''
     Augments the standard form with related model forms
-    so that the template is well informed - and can do
-    Javascript wizardry based on this information
+    so that the template is well informed - and can perform
+    JavaScript wizardry based on this information
 
     Also replaces the widget for all ModelChoiceField instances
     with a django-autocomplete-light (DAL) widget. And for formsets
@@ -473,7 +472,8 @@ def get_form_generic(self, return_mqfns=False):
 
     :param self: and instance of CreateView or UpdateView
 
-    This is code shared by the two views so peeled out into a generic.
+    This is code shared by the two views (Create and Update) so peeled 
+    out into a generic.
     '''
     if settings.DEBUG:
         log.debug("Building form.")
@@ -492,7 +492,7 @@ def get_form_generic(self, return_mqfns=False):
     unique_model_choice = getattr(self, 'unique_model_choice', [])
 
     # If the model has a field_order attribute, and the form does not have one already
-    # Use the model field_ordering. DJango provides no way of specifying field_order
+    # Use the model field_ordering. Django provides no way of specifying field_order
     # in a model that is respected in the model form alas. So we use the model.field_order
     # here to reorder the form fields.
     if hasattr(model, "field_order") and getattr(form, "field_order", None) is None:
@@ -510,7 +510,11 @@ def get_form_generic(self, return_mqfns=False):
     self.has_markdown = False
     for field_name, field in form.fields.items():
         if isinstance(field, MarkdownFormField):
-            field.widget = MDEWidget()
+            # We enable the spell checker, that is built into django-markdownfield's
+            # MDE editor. It uses spellcheck=flase on the widget to suppress tools like 
+            # Grammarly and LanguageTool. Which is a shame. But it provides this internal
+            # spell checker which we can use. 
+            field.widget = MDEWidget(options={"spellChecker": True})
             self.has_markdown = True
         if isinstance(field, LocationField):
 
@@ -554,7 +558,7 @@ def get_form_generic(self, return_mqfns=False):
             if form.initial:
                 initial = form.initial[field_name]
                 if initial == (0, 0):
-                     del form.initial[field_name]
+                    del form.initial[field_name]
 
             field.widget.map_attrs = {
                 "center": [mid_lon, mid_lat],
@@ -608,7 +612,7 @@ def get_form_generic(self, return_mqfns=False):
         else:
             db_object = None
 
-        # related_forms = get_related_forms(model, form_data, db_object)
+        # Instantiate a RelatedForms dict and add it to the form
         related_forms = RelatedForms(model, form_data, db_object)
 
         for related_model_name, related_form in related_forms.items():
@@ -748,19 +752,19 @@ def post_generic(self, request, *args, **kwargs):
             html += "</table>"
             return HttpResponse(html)
 
-        # Perform an inital validity check before proceeding. There is a deep GOTCHA in this though
+        # Perform an initial validity check before proceeding. There is a deep GOTCHA in this though
         # that we have to avoid. self.get_form() sets self.form.instance from self.object
         # (in django.forms.models.BaseModelForm.__init__) then during a full_clean() that is_valid()
-        # performs one fo the final steps to apply the form data to self.insance
+        # performs one of the final steps to apply the form data to self.insance
         # (in django.forms.models.BaseModelForm._post_clean). This is all fairly intrinsic to what
         # Django methods do, leaving an instance which is self.object with the form data applied.
         #
-        # Note: The assigment self.form.instance = self.object is by reference and the two refer to
-        # the same object which is why when self.form.instance is updated in the full_clean to conatin
+        # Note: The assignment self.form.instance = self.object is by reference and the two refer to
+        # the same object which is why when self.form.instance is updated in the full_clean to contain
         # form data, it also updates self.object (the same object)
         #
         # The problem for us, is we want to offer the pre_transaction handler the form.data and
-        # ideally form.cleaned_data so it does not have to replciate any of Django's already
+        # ideally form.cleaned_data so it does not have to replicate any of Django's already
         # implemented form parsing and interpretation.
         #
         # The way to do that is in this first pass to feign a Creation form, by removing self.form.instance.
@@ -771,21 +775,21 @@ def post_generic(self, request, *args, **kwargs):
 
         # Cloak self.form.instance.
         # Django wants to see an new instance of the model though.
-        # This simply mimics what django.forms.models.BaseModelForm.__init__ does when no object is porvided.
+        # This simply mimics what django.forms.models.BaseModelForm.__init__ does when no object is provided.
         #
-        # The pre_transaction and pre_save handler now both have accesss to self.object as it was.
+        # The pre_transaction and pre_save handler now both have access to self.object as it was.
         # We will uncloak this just before saving.
         if self.object:  # protect it from the full_clean augmentation
             self.form.instance = self.form._meta.model()
-            # Setting the instance to a newly instantiated instance seesm to trigger a form clean which
-            # Can generate errors based on a a the CreateView context (like unique value constarints)
+            # Setting the instance to a newly instantiated instance seems to trigger a form clean which
+            # Can generate errors based on a a the CreateView context (like unique value constraints)
             # which have no bearing on the UpdateView which has an object attached. As we validate the
             # form below in the proper context, we clear any form errors that this (dummy) context
             # may have generated. The joy of trying to trick Django ...
             self.form.errors.clear()
 
         # HOOK 1 pre_validation: Hook for pre-processing the form (before the first from validation)
-        # Ideal for injecting any form submission alterationsdata cleaning or reconiliation as needed
+        # Ideal for injecting any form submission alterations, data cleaning or reconciliation as needed
         # to ensure that the is_valid() call passes or fails as desired.
         if callable(getattr(self, 'pre_validation', None)):
             next_kwargs = self.pre_validation()
@@ -801,7 +805,7 @@ def post_generic(self, request, *args, **kwargs):
             # HOOK 2 pre_transaction: Hook for pre-processing the form (before a database transaction is opened)
             # The form has passed first validation and now is a chance to inject some code before we open a
             # database transaction. Ideal for pre-transaction checks on the form data (can add form errors
-            # if neeed and the next validation will fail.
+            # if needed and the next validation will fail.
             if callable(getattr(self, 'pre_transaction', None)):
                 next_kwargs = self.pre_transaction(**next_kwargs)
                 if not next_kwargs:
@@ -831,8 +835,8 @@ def post_generic(self, request, *args, **kwargs):
                                 # See: https://code.djangoproject.com/ticket/1130
                                 # list items are hard to identify it seems in a
                                 # generic manner
-                                log.debug(
-                                    f"\t{key}: {val} & {self.form.data.getlist(key)}")
+                                v = "\\n".join(val.splitlines())
+                                log.debug(f"\t{key}: {v} & {self.form.data.getlist(key)}")
 
                         if self.object:  # unprotect it from the full_clean augmentation once more
                             # Uncloak self.form.instance. From here on in we
@@ -858,7 +862,7 @@ def post_generic(self, request, *args, **kwargs):
                         kwargs = self.kwargs
                         kwargs['pk'] = self.object.pk
 
-                        # By default, on success jump to a view of the obbject
+                        # By default, on success jump to a view of the object
                         # just submitted.
                         if not self.success_url:
                             self.success_url = reverse_lazy(
@@ -869,7 +873,7 @@ def post_generic(self, request, *args, **kwargs):
                             # with that object attached. Failure to this results in the
                             # form_clean failing as the formsets don't have populated
                             # back references (as we had no object) and it fails with
-                            # 'This field is required.' erros on the primary keys
+                            # 'This field is required.' error on the primary keys
                             self.form.related_forms = RelatedForms(
                                 self.model, self.form.data, self.object)
 
@@ -878,9 +882,8 @@ def post_generic(self, request, *args, **kwargs):
                                 log.debug(f"Saving the related forms.")
 
                             # Either of the pre_transaction or pre_save handlers might have replace self.form.data with
-                            # something cleaned up. self.form.related_forms was initialised before these were alled and
-                            # noted the contents of self.form.data. We need to
-                            # inform it of any change.
+                            # something cleaned up. self.form.related_forms was initialised before these were called and
+                            # noted the contents of self.form.data. We need to inform it of any change.
                             self.form.related_forms.set_data(self.form.data)
 
                             if self.form.related_forms.are_valid(self.model.__name__):
@@ -890,20 +893,19 @@ def post_generic(self, request, *args, **kwargs):
                                     log.debug(f"Saved the related forms.")
                             else:
                                 if settings.DEBUG:
-                                    log.debug(
-                                        f"Invalid related forms. Errors: {self.form.related_forms.errors}")
+                                    log.debug(f"Invalid related forms. Errors: {self.form.related_forms.errors}")
                                 # Attach the newly annotated (with errors) related forms to the
-                                # form so that theyt reach the response template.
+                                # form so that they reach the response template.
                                 # self.form.related_forms = related_forms
                                 # We raise an exception to break out of the
                                 # atomic transaction triggering a rollback.
                                 for rm, errors in self.form.related_forms.errors.items():
-                                    for error in errors:
-                                        self.form.add_error(
-                                            None, f"{rm}: {error.as_text()}")
+                                    for k, error in errors.items():
+                                        field = k if k != NON_FIELD_ERRORS else "form"
+                                        for msg in error: 
+                                            self.form.add_error(None, f"{rm} {k}: {msg}")
 
-                                raise ValidationError(
-                                    f"Please fix these and resubmit.")
+                                raise ValidationError(f"Please fix these and resubmit.")
 
                         # Give the object a chance to cleanup relations before we commit.
                         # Really a chance for the model to set some standards on relations
@@ -912,7 +914,7 @@ def post_generic(self, request, *args, **kwargs):
                         if callable(getattr(self.object, 'clean_relations', None)):
                             self.object.clean_relations()
 
-                        # HOOK 4 pre_commit: Before committing give the view defintion a chance to do something
+                        # HOOK 4 pre_commit: Before committing give the view definition a chance to do something
                         # prior to committing the update. This is ideal for any checks that rely on the form (and its
                         # related formsets_having been saved. Code therein can access the saved objects and draw
                         # conclusions. Raising an IntegrityError or ValidationError  will roll back the transaction.
@@ -931,10 +933,9 @@ def post_generic(self, request, *args, **kwargs):
                     #    that is migrations should be made and applied. The don't have a message but
                     #    a message can be found in the first argument.
                     if settings.DEBUG:
-                        # Some tracback generation for debugging if needed
+                        # Some traceback generation for debugging if needed
                         exc_type, exc_obj, exc_tb = sys.exc_info()
-                        fname = os.path.split(
-                            exc_tb.tb_frame.f_code.co_filename)[1]
+                        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                         log.debug(
                             f"{exc_type.__name__} in {fname} at line {exc_tb.tb_lineno}")
                         log.debug(traceback.format_exc())

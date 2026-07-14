@@ -12,9 +12,9 @@ database (using a CreateView) what other models would also be added. In short, i
 this model makes no sense isolated from other models, and belong together as one
 rich object definition in a sense.
 
-There are two primary use cases, viewing forms and processing fsubmitted forms.
+There are two primary use cases, viewing forms and processing submitted forms.
 
-Each of these in the case of a CreateView and an UpdateView which dictate what
+Each of these is the case of a CreateView and an UpdateView which dictate what
 data is available for display primarily.
 
 See .model for a definition of intrinsic_relations.
@@ -27,10 +27,12 @@ from collections import OrderedDict
 from django.conf import settings
 from django.db.models import Model
 from django.forms.models import modelformset_factory, inlineformset_factory, fields_for_model
-from django.core.exceptions import ValidationError
+from django.forms.utils import ErrorDict, ErrorList
+from django.core.exceptions import ValidationError, NON_FIELD_ERRORS
 
 from .logs import logger as log
 from .model import intrinsic_relations, is_intrinsic_relation, can_save_related_formsets
+
 
 # A local DEBUG flag because the debugging of related form creation is rather verbose
 # and distracting if debugging some other part of the process.
@@ -39,16 +41,20 @@ DEBUG = True
 # Only debug if global debugging is on
 DEBUG = DEBUG and settings.DEBUG
 
+# For keying an ErrroDict on this dict of RelatedForms
+NON_FORM_ERRORS = NON_FIELD_ERRORS 
 
 class RelatedForms(dict):
+    # A specific re-implementation of dict!
+    #
     # The basic offering here is build a list of related forms
     # It will be recursively generated and for that reason we encapsulate
     # the process in  class with some diagnostic features.
 
-    # related_forms will be a list of empty forms each empy form being granted
-    # extra attributes:
+    # related_forms will be a list of empty forms each empty form 
+    # being granted extra attributes:
     #
-    # field_data     a dictionay of data that describe one or more
+    # field_data     a dictionary of data that describe one or more
     #                instances of the data filled form
     #
     # instance_forms a list of forms populated with data, one for each
@@ -101,30 +107,56 @@ class RelatedForms(dict):
         '''
         The various handlers in form processing might update form_data for reasons of their own.
 
-        if they do they should call this on existing any existing iinstance of RelatedForms
+        if they do they should call this on existing any existing instance of RelatedForms
         to update its __form_data.
 
         :param form_data: a form.data dictionary
         '''
         self.__form_data = form_data
+        
         # The form data is also in each of the related forms and the formset and the formset forms!
         # Where and when Django validators consult it is not clear but it exists in all those places
-        # and missing any can lead to validation errors!
+        # and missing any can lead to validation errors! So we copy the data to all the required spots.
         for name, form in self.__related_forms.items():
+            # Each form in the related_forms is an augmented empty form (a standard 
+            # ModelForm/BaseModelForm instance) with for the model stored at form.model 
+            # (one of the attributes added)
+            #
+            # The empty form also has a formset attribute which is standard Django 
+            # BaseInlineFormSet/BaseModelFormSet/BaseFormSet object build with 
+            # inlineformset_factory.
+            #
+            # The formset has a forms attribute which is a list of forms  in the formset 
+            # (that is standard Django ModelForm/BaseModelForm instances for form.model again) 
             if not form.data == form_data:
-                form._errors = []
+                # form has an _errors property of type ErrorDict
+                # Django requires the forms to have that!
                 form.data = form_data
-            if not form.formset.data == form_data:
-                form.formset._errors = []
-                form.formset.data = form_data
+                # A full clean is needed to update form.cleaned_data which the SQL
+                # will be built from. A full clean is how we ensure the new form_data
+                # is applied.
+                form.full_clean()
+
             for subform in form.formset:
                 if not subform.data == form_data:
-                    subform._errors = []
+                    # subform has an _errors property of type ErrorDict
+                    # Django requires the forms to have that!
                     subform.data = form_data
                     # A full clean is needed to update subform.cleaned_data which the SQL
                     # will be built from. A full clean is how we ensure the new form_data
                     # is applied.
                     subform.full_clean()
+            
+            if not form.formset.data == form_data:
+                # form.formset has 
+                #    an error_messages dict  
+                #        keyed on and with message as value
+                #        e.g. 'missing_management_form': 'ManagementForm data is missing or has been tampered with. Missing fields: %(field_names)s. You may need to file a bug report if the issue persists.'
+                #    an errors list of ErrorDicts
+                #        one per form in the formset
+                #    a data attribute which is a QueryDict (a web form submission).
+                form.formset.data = form_data
+                form.formset.full_clean()                
 
             # Recurse if needed
             if hasattr(form, 'related_forms'):
@@ -132,24 +164,120 @@ class RelatedForms(dict):
 
     def _errors(self, affix=""):
         '''
-        Returns a dict of the form and related form errors, keyted on the model name
+        Returns a dict of the form and related form errors, keyed on the model name
         '''
-        errors = {}
+        errors = ErrorDict()
+         
         for name, form in self.__related_forms.items():
-            errors[f"{affix}{name}"] = form.errors.copy()
-            for i, subform in enumerate(form.formset):
-                errors[f"{affix}{name}.{i}"] = subform.errors.copy()
+            # Each form in the related_forms is an augmented empty form (a standard 
+            # ModelForm instance) with for the model stored at form.model (one of the 
+            # attributes added). THis empty form ought not have any errors but we can 
+            # check form.errors for and ErrrorDict and form.non_field_errors() for a
+            # list of 
+            #
+            # The empty form also has a formset attribute which is standard Django 
+            # BaseFormSet object.
+            #
+            # The formset has a forms attribute which is a list of forms  in the formset 
+            # (that is standard Django ModelForm instances for form.model again) 
+            
+            fs = form.formset
+
+            # Errors can be collected here for the all the related_form elements
+            #   1. The empty form (which should have none)
+            #   2. The formset itself 
+            #   3. Each of the forms in the formset.
+            
+            # Django manages errors on a form with:
+            #    form.errors
+            #        An ErrorDict (django.forms.utils.ErrorDict) keyed on field name, 
+            #        with __all__ (NON_FIELD_ERROR$) for non field errors.  The key 
+            #        is a field name and the value a list of errors 
+            #    form.non_field_errors()
+            #        Just returns the __all__ entry form.errors really. 
+            #        An ErrorList.
+            #
+            # Django has errors specific to one form in a formset in 
+            #    fs.errors 
+            #        a list of ErrroDicts, one per form in the formset keyed on field, and message
+            #        with __all__ (NON_FIELD_ERROR$) being a reserved field name for errors that relate to the 
+            #        whole form and no specific field on it. 
+            #
+            #    fs.non_form_errors()
+            #        An ErrorList (django.forms.utils.ErrorList).  
+            #        Errors not related to a form in the formset There are only three that in there 
+            #        and they are drawn from the dict fs.error_messages which has three keys:message 
+            #        pairs with these keys: 
+            #            'too_few_forms', 'too_many_forms', and 'missing_management_form' 
+            #        for customising messages on the formset.
+            #
+            # Goal:
+            #    RelatedForms is a dict of template (empty) model forms.
+            #    To with we would want errors to be an ErrorDict keyed on the 
+            #    form name. 
+            #
+            #    __all__ (NON_FORM_ERRORS ) should be an ErrorList of all
+            #        NON_FIELD and non_form_errors from the empty form, 
+            #        formset and subforms just to sweep them all up.
+            #    each form entry should be an ErrorDict itself being a
+            #        merge of all the ErrorDicts for that form, its 
+            #        formsets
+            
+            if DEBUG:
+                # Sniffing the errors on all the components.
+                log.debug(f"Related Form {name} errors:")
+                for k,m in form.errors.items():
+                    log.debug(f"\t{k}: {m}")
+                log.debug("\tNon field errors:")
+                for e in form.non_field_errors():
+                    log.debug(f"\t\t{e}")
+                log.debug(f"Formset errors for formset {name}: ")
+                for i, msg in enumerate(fs.non_form_errors()):
+                    log.debug(f"\t{i}: {msg}")
+                log.debug(f"Form errors for forms in formset {name}: ")
+                n = len(fs.forms)
+                for i,f in enumerate(fs.forms):
+                    log.debug(f"\tForm {i} of {n}:")
+                    for k,m in f.errors.items():
+                        log.debug(f"\t\t{k}: {m}")
+                    log.debug("\tNon field errors:")
+                    for e in f.non_field_errors():
+                        log.debug(f"\t\t{e}")
+
+            errors[name] = ErrorDict()
+            
+            # ErrorDict has keyed entries each of which should have an ErrorList as a value
+            nfe = ErrorList()
+            if form.non_field_errors():
+                nfe.append(form.non_field_errors())
+            if form.formset.non_form_errors():
+                nfe.append(form.formset.non_form_errors())
+            
+            if nfe:
+                errors[name][NON_FORM_ERRORS] = nfe
+
+            count = len(fs.forms)
+            for i,f in enumerate(fs.forms):
+                for k,e in f.errors.items():
+                    key = f"form {i+1} (of {count})" if k == NON_FIELD_ERRORS else f"{k} in form {i+1} (of {count})"
+                    errors[name][key] = e # An ErrorList
+
+            if DEBUG:
+                log.debug(f"Constructed errors for the related_form {name}: ")
+                for e in errors[name]:
+                    log.debug(f"\t{e}: {errors[name][e]}")
 
             # Recurse if needed
             if hasattr(form, 'related_forms'):
                 related_errors = form.related_forms._errors(f"{name}-")
                 errors.update(related_errors)
-
+                
         return errors
 
     @property
     def errors(self):
-        return self._errors()
+        all_errors = self._errors()
+        return all_errors
 
     # @property
     # def errors(self):
@@ -174,8 +302,8 @@ class RelatedForms(dict):
                             modelformset_factory is used here
                             initialised with a db_object.
         Form posting (submission):
-            We have form_dat and a db_object in both Create
-            and Update Views.
+            We have form_data and a db_object in both 
+            Create and Update Views.
             That is because RelatedForms instantiated only
             after a parent object has been saved
 
@@ -196,13 +324,14 @@ class RelatedForms(dict):
                     On to_one relations the value is otehrwise naked
                     On to_many relations it will be a list of such values.
                 formset
-                    A formset based on field_data. of key importance when
-                    saving related forms.
+                    A formset based on field_data. 
+                    Of key importance when saving related forms.
+                    Very important when the relationship is to_many
                 instance_forms
-                    if there is a known related instance or istances
+                    if there is a known related instance or instances
                     a form for each instance provided in a dict keyed by
-                    primary key. The each have a related_forms attribute
-                    whhich is recursively the same deal with this model
+                    primary key. They each have a related_forms attribute
+                    which is recursively the same deal with this model
                     and instance in focus.
                 related_forms
                     Recursively the same deal with this model in focus.
@@ -214,11 +343,13 @@ class RelatedForms(dict):
         model_history is used to avoid infinite recursion. When calling itself pushes
         the model name onto model_history, and on entering checks if model is in
         model_history, bailing if so. It is also used to make debugging output
-        more lucid. As a recurisve process it can weave tangled web quickly.
+        more lucid. As a recursive process it can weave tangled web quickly.
 
         :param model:        A Django model (instance of django.db.models.Model)
         :param form_data:    A dictionary of form data from request.form.data or request.POST
         :param db_object:    An instance of model.
+        
+        :returns             a list of generic forms as defined herein  
         '''
 
         def custom_field_callback(field):
@@ -250,7 +381,8 @@ class RelatedForms(dict):
             if not form_data is None:
                 log.debug(f"{self.dp}Got form_data:")
                 for (key, val) in sorted(form_data.items()):
-                    log.debug(f"{self.dp}\t{key}:{val}")
+                    v = "\\n".join(val.splitlines())
+                    log.debug(f"{self.dp}\t{key}:{v}")
                 log.debug("\n")
 
             log.debug(f"{self.dp}Looking for {len(intrinsic_relations(model))} related forms: {intrinsic_relations(model)}.")
@@ -280,7 +412,7 @@ class RelatedForms(dict):
         #    or a list of values for to_many relations.
         # 4. Populate related_forms[model_name].instance_forms which is a dictionary keyed on PK
         #    of pre-filled forms (with the object data)
-        # 5. To drill down to the related model and repeat (recursivelY)
+        # 5. To drill down to the related model and repeat (recursively)
 
         # These are the relations we can expect:
         #     many_to_many:  this is a ManyToManyField
@@ -328,11 +460,14 @@ class RelatedForms(dict):
             #    formset_factory
             #        lets you render a bunch of forms together, but these forms
             #        are NOT related to any database models.
+            #        https://docs.djangoproject.com/en/6.0/topics/forms/formsets/
             #    modelformset_factory
             #        lets you create/edit a bunch of Django model objects together,
+            #        https://docs.djangoproject.com/en/6.0/topics/forms/modelforms/#model-formsets
             #    inlineformset_factory
             #        lets you manage a bunch of Django model objects that are all
             #        related to a single instance of another model.
+            #        https://docs.djangoproject.com/en/6.0/topics/forms/modelforms/#inline-formsets
             if form_data and db_object and inline:
                 Related_Formset = inlineformset_factory(model, relation.related_model, can_delete=True, extra=0, fields=('__all__'), formfield_callback=custom_field_callback)
             else:
@@ -529,6 +664,14 @@ class RelatedForms(dict):
             # generic_form.related_forms = self.get(relation.related_model)
             generic_form.related_forms = RelatedForms(relation.related_model, form_data, history=self.__model_history)
 
+            if DEBUG:
+                native_attrs = set(dir(related_formset.empty_form))
+                final_attrs = set(dir(generic_form))
+                new_attrs = final_attrs - native_attrs
+                log.debug(f"{self.dp}Added these attributes to the EmptyForm for {related_model_name}:")
+                log.debug(f"{self.dp}\t{new_attrs}")
+                print()
+
         if DEBUG:
             log.debug(f"{self.dp}Found {len(related_forms)} related forms: {[f[0] for f in related_forms.items()]}.")
             log.debug(f"{self.dp}=================================================================\n")
@@ -556,7 +699,8 @@ class RelatedForms(dict):
                 log.debug(f"{self.dp} Form data:")
 
                 for k, v in sorted(self.__form_data.items()):
-                    log.debug(f"{self.dp}\t{k} = {v}")
+                    val = "\\n".join(v.splitlines())
+                    log.debug(f"{self.dp}\t{k} = {val}")
 
         self.__model_history = []
         self.__are_valid = True
@@ -604,13 +748,13 @@ class RelatedForms(dict):
 
                 # Django returns a fairly liberal errors list for formsets
                 # Basically formset.errors is a list of dicts one per form in
-                # formset. The dic is empty for forms with no erros and has
+                # formset. The dict is empty for forms with no errors and has
                 # a field: message entry for forms that have errors. If the
                 # formset has no forms in it this list is empty.  We don't
                 # add such empty lists to our collected form_errors. Empty
                 # formsets validly arise when an intrinsic_relations model member
                 # includes a field that cannot be save (points to a model
-                # that has no freignkiy back to htis one) for the purpose
+                # that has no foreign key back to this one) for the purpose
                 # of making the basic form available to a rich template.
                 if not is_valid:
                     if DEBUG:
@@ -646,7 +790,7 @@ class RelatedForms(dict):
 
     def _save(self, db_object=None, related_forms=None):
         '''
-        Recursively saves related forms as needed. To avoid exposing hte recursion
+        Recursively saves related forms as needed. To avoid exposing the recursion
         management save() is implemented without them, and this is the internal
         recursor.
 

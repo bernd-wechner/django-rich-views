@@ -147,6 +147,12 @@ def isPositiveInt(s):
     except:
         return False
 
+def isPositiveIntOrZero(s):
+    try:
+        return int(s) >= 0
+    except:
+        return False
+
 
 def isFloat(s):
     try:
@@ -155,6 +161,8 @@ def isFloat(s):
     except:
         return False
 
+def isNumber(s):
+    return isInt(s) or isFloat(s)
 
 def numeric_if_possible(s):
     if isInt(s):

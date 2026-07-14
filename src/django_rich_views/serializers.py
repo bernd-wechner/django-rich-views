@@ -1,4 +1,4 @@
-import datetime, json, decimal, uuid
+import datetime, json, decimal, uuid, pickle
 
 from django.core.serializers.json import DjangoJSONEncoder
 
@@ -114,3 +114,13 @@ def load(*args, **kwargs):
     return json.load(*args, **kwargs)
 
 
+class PickleSessionSerializer:
+    """
+    Simple wrapper around pickle to be used in signing.dumps and
+    signing.loads.
+    """
+    def dumps(self, obj):
+        return pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
+
+    def loads(self, data):
+        return pickle.loads(data)

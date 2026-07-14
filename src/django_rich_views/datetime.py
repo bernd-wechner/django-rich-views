@@ -6,7 +6,7 @@ Datetime management
 # Python imports
 import pytz
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dateutil import parser
 from urllib.parse import quote as encodeURIComponent
 
@@ -79,13 +79,23 @@ def fix_time_zone(dt, tz=UTC):
 
     return dt
 
+def equal(dt1, dt2):
+    '''
+    Test for equality of two datetimes. Sadly datetimes that have identical timestamps are not identical if in different timezones or one has DST and the other not
+    
+    So we provide a shorthand for euqality testing that is robust.
+    
+    :param dt1:
+    :param dt2:
+    '''
+    return dt1.astimezone(timezone.utc) == dt2.astimezone(timezone.utc)
 
 def make_aware(date_time, timezone=None):
     '''
     A quick simple improvement in Django's make_aware which takes into account daylight savings time.
     '''
     if is_naive(date_time):
-        return django_make_aware(date_time, timezone=timezone, is_dst=is_dst(when=date_time))
+        return django_make_aware(date_time, timezone=timezone)
     else:
         return date_time
 
@@ -129,9 +139,9 @@ def decodeDateTime(dt, test=False):
     # Seconds are optional inside of na optiona time group
     # Date is mandatory
     pattern = (r"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})"
-               + "(([T\s](?P<hour>\d{2})[:-](?P<minutes>\d{2}))?([:-](?P<seconds>\d{2}))?)?"
-               + "\s?"
-               + "((?P<offset_sign>[\s+-])(?P<offset_hours>\d{2})[:-]?(?P<offset_minutes>\d{2}))?$")
+               + r"(([T+\s](?P<hour>\d{2})[:-](?P<minutes>\d{2}))?([:-](?P<seconds>\d{2}))?)?"
+               + r"\s?"
+               + r"((?P<offset_sign>[\s+-])(?P<offset_hours>\d{2})[:-]?(?P<offset_minutes>\d{2}))?$")
 
     if m:= re.match(pattern, dt):
         p = m.groupdict()
@@ -153,7 +163,7 @@ def decodeDateTime(dt, test=False):
 
 def encodeDateTime(dt):
     '''
-    The opposite of decodeDateTime, this sis a Python implementation of a Javascript encoder:
+    The opposite of decodeDateTime, this is a Python implementation of a Javascript encoder:
 
         function encodeDateTime(datetime) {
             // We communicate datetimes in the ISO 8601 format:
@@ -195,3 +205,41 @@ def encodeDateTime(dt):
     :param dt: A datetime object
     '''
     return encodeURIComponent(str(dt)).replace("%20", "+").replace("%3A", "-").replace("%2B", "+");
+
+
+def normalize_tz_for_db(raw_dt_string):
+    '''
+    Client side date time validators and Python datetime validators are generally robust against Timezones like +23.
+    
+    Database engines are often more sensitive and demand +/-15 as a valid range.
+    
+    To wit, it can be useful to normalize the TZ part of a submitted sting early in validation if it's needed in any database access.
+      
+    :param raw_dt_string:
+    '''
+    try:
+        dt = parser.parse(raw_dt_string)
+        
+        if dt.tzinfo:
+            offset_hours = dt.utcoffset().total_seconds() / 3600
+            
+            # If the offset is outside the DB-safe range (+/- 15)
+            if abs(offset_hours) > 15:
+                # 1. Convert to UTC to get the absolute "moment"
+                utc_dt = dt.astimezone(timezone.utc)
+                
+                # 2. Calculate the "wrapped" offset (e.g., 23:50 -> -00:10)
+                # Mathematically: ((offset + 12) % 24) - 12
+                wrapped_offset_hours = ((offset_hours + 12) % 24) - 12
+                
+                # 3. Project that moment back into the normalized offset
+                new_tz = timezone(timedelta(hours=wrapped_offset_hours))
+                dt = utc_dt.astimezone(new_tz)
+                
+                return dt.isoformat()
+                
+        return raw_dt_string
+    except (ValueError, TypeError):
+        # Let Django's standard field validation handle malformed strings
+        return raw_dt_string
+    

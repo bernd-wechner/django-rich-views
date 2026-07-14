@@ -11,8 +11,51 @@ from datetime import datetime, timedelta
 from django.db import connection
 from django.db.models import Field
 from django.db.models.lookups import In
-from django.db.models.fields.related_lookups import MultiColSource, get_normalized_value
 
+import sys, os, threading, traceback
+def print_diagnostics(message, n=5):
+    print("======================= START Stack Diagnostics ===============================")
+    print(f"Message: {message}", flush=True)
+    print(f"Process ID: {os.getpid()}", flush=True)
+    print(f"Thread ID: {threading.get_ident()}", flush=True)
+    print("Top {} Stack Frames:".format(n), flush=True)
+    frame = sys._getframe()
+    for i in range(n):
+        if frame is None:
+            break
+        print(f"  Frame {i+1}: {frame.f_code.co_filename}, line {frame.f_lineno}, in {frame.f_code.co_name}")
+        frame = frame.f_back
+    print("========================= END Stack Diagnostics ===============================")
+
+def executeable_SQL(SQL, params):
+    # Simple quality assurance - this premise should never break 
+    n_slots = SQL.count("%s")
+    n_vals = len(params)
+    assert n_slots==n_vals
+
+    # params is a dict of parameters.
+    # DateTimes and TimeDeltas are alas converted to strings without the requiste
+    # wrapping in single quotes. So we replace them by strign reps wrapped in single
+    # quotes
+    params = list(params)
+    for i, p in enumerate(params):
+        if isinstance(p, datetime):
+            params[i] = "'" + str(p) + "'"
+        elif isinstance(p, timedelta):
+            params[i] = "INTERVAL '" + str(p) + "'"
+    params = tuple(params)
+
+    # And this is used when excuted as described here:
+    #  https://docs.djangoproject.com/en/2.2/topics/db/sql/#passing-parameters-into-raw
+    #
+    # The key note being:
+    #     params is a list or dictionary of parameters.
+    #     You’ll use %s placeholders in the query string for a list,
+    #     or %(key)s placeholders for a dictionary (where key is replaced
+    #     by a dictionary key, of course)
+    #
+    # Which is precisely how Python2 standard % formating works.
+    return SQL % params
 
 def get_SQL(queryset, explain=False, pretty=True):
     '''
@@ -37,44 +80,26 @@ def get_SQL(queryset, explain=False, pretty=True):
         sql, params = queryset.query.sql_with_params()
         cursor = connection.cursor()
         cursor.execute('EXPLAIN ' + sql, params)
-        return cursor.db.ops.last_executed_query(cursor, sql, params).replace("EXPLAIN ", "", 1)
+        SQL = cursor.db.ops.last_executed_query(cursor, sql, params).replace("EXPLAIN ", "", 1)
     else:
         # We don't want to execute a query in this case but find the SQL reliablyf rom Django
 
         # We can get SQL and params from the query compiler
-        sql, params = queryset.query.get_compiler(using=queryset.db).as_sql()
+        try:
+            sql, params = queryset.query.get_compiler(using=queryset.db).as_sql()
+        except Exception as E:
+            print_diagnostics("as_sql failed!")
+            breakpoint()
+            pass
+        SQL = executeable_SQL(sql, params)
 
-        # params is a dict of parameters.
-        # DateTimes and TimeDeltas are alas converted to strings without the requiste
-        # wrapping in single quotes. So we replace them by strign reps wrapped in single
-        # quotes
-        params = list(params)
-        for i, p in enumerate(params):
-            if isinstance(p, datetime):
-                params[i] = "'" + str(p) + "'"
-            elif isinstance(p, timedelta):
-                params[i] = "INTERVAL '" + str(p) + "'"
-        params = tuple(params)
-
-        # And this is used when excuted as described here:
-        #  https://docs.djangoproject.com/en/2.2/topics/db/sql/#passing-parameters-into-raw
-        #
-        # The key note being:
-        #     params is a list or dictionary of parameters.
-        #     You’ll use %s placeholders in the query string for a list,
-        #     or %(key)s placeholders for a dictionary (where key is replaced
-        #     by a dictionary key, of course)
-        #
-        # Which is precisely how Python2 standard % formating works.
-        SQL = sql % params
-
-        if pretty:
-            return sqlparse.format(SQL, reindent=True, keyword_case='upper')
-        else:
-            return SQL
+    if pretty:
+        return sqlparse.format(SQL, reindent=True, keyword_case='upper')
+    else:
+        return SQL
 
 
-def print_SQL(queryset, explain=False):
+def print_SQL(queryset, explain=False, pretty=True):
     '''
     A trivial wrapper around get_SQL that simply prints the result. Useful primarily in a debugger say, to
     produce a SQL straing htat can be copied/ and pasted into a Query Tool. That is, it doesn't have quotes
@@ -83,7 +108,7 @@ def print_SQL(queryset, explain=False):
     :param queryset: A Django QuerySet
     :param explain:  If True uses the server's EXPLAIN function. Not good for invalid SQL alas.
     '''
-    print(get_SQL(queryset, explain))
+    print(get_SQL(queryset, explain, pretty))
 
 
 def wrap_filter(queryset, sql_where_crtiteria):

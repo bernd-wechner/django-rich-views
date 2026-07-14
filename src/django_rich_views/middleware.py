@@ -14,7 +14,7 @@ class TimezoneMiddleware(object):
     A Middleware which activates the session stores timezone if available else the settings
     configured timezeone.
 
-    Make to to include it after 'django.contrib.auth.middleware.AuthenticationMiddleware'
+    Make sure to include it after 'django.contrib.auth.middleware.AuthenticationMiddleware'
     in the MIDDLEWARE setting as it needs request.user to be available.
     '''
 
